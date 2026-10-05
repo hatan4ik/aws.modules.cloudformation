@@ -1,0 +1,21 @@
+# The template the StackSet deploys to every target account: one SSM
+# parameter, which costs nothing. Its point is the permissions it needs: the
+# execution role is granted exactly the actions in the AWS::SSM::Parameter
+# resource type's handler permissions (aws cloudformation describe-type
+# --type RESOURCE --type-name AWS::SSM::Parameter), on parameters under
+# /stackset-bootstrap/ only.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: StackSets self-managed bootstrap example - one SSM parameter per target account.
+Parameters:
+  Message:
+    Type: String
+Resources:
+  Parameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /stackset-bootstrap/message
+      Type: String
+      Value: !Ref Message
+Outputs:
+  ParameterName:
+    Value: !Ref Parameter

@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Submodule `self-managed-roles`: creates the IAM roles a self-managed StackSet needs, one per call: `role = { administration = {...} }` in the administrator account or `role = { execution = {...} }` in a target account. A translation of AWS's sample templates `AWSCloudFormationStackSetAdministrationRole.yml` and `AWSCloudFormationStackSetExecutionRole.yml`, with the confused-deputy trust conditions AWS recommends, the execution role trusting the administration role ARN instead of the whole administrator account, and the execution role limited to `cloudformation:*` (AWS's documented minimum) plus caller-supplied `inline_policy`/`policy_arns` instead of the sample's `AdministratorAccess`. Outputs `role_arn`, `role_name`, and `stack_set_permission_model`, which plugs directly into `modules/stack-set`'s `permission_model`. Contract tests cover every policy document, validation, and output, and feed the output into `modules/stack-set`.
+- Example `self-managed-bootstrap`: zero to a deployed self-managed StackSet in one configuration. It composes `modules/self-managed-roles` (administration role in the administrator account, execution role in a target account through an `assume_role` provider, scoped to what the template creates) with `modules/stack-set`, and has its own credential-free test that applies all three calls with both providers mocked.
 
 ### Fixed
 
