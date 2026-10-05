@@ -21,6 +21,7 @@ jobs:
         directory:
           - .
           - modules/stack-set
+          - modules/self-managed-roles
           - examples/inline-template
           - examples/s3-template-url
           - examples/stack-set-organization

@@ -39,6 +39,7 @@ body:
       options:
         - stack (stack.tf, variables.tf, locals.tf)
         - stack-set submodule (modules/stack-set)
+        - self-managed-roles submodule (modules/self-managed-roles)
         - advisory checks (checks.tf)
         - examples
         - integration suites

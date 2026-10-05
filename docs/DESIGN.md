@@ -40,16 +40,22 @@ port the template.
   the provider's account and region.
 - `modules/stack-set` provisions **one** `aws_cloudformation_stack_set` and
   one `aws_cloudformation_stack_set_instance` per declared target and region.
+- `modules/self-managed-roles` provisions **one** IAM role per call: the
+  self-managed StackSets administration role or execution role (D13).
 
 Both are independent: the root does not call the submodule, and a caller
 uses whichever matches the resource they need. They are one repository
 because they share the template, parameter, and capability contract and the
 same reasons to exist, not because one wraps the other.
 
-The module does not create service roles, StackSet administration or
-execution roles, template buckets, SNS topics, or Organizations trusted
-access. Those have separate owners and lifecycles; the module consumes their
-identifiers. It performs no data-source reads.
+The root module and `modules/stack-set` do not create service roles,
+StackSet roles, template buckets, SNS topics, or Organizations trusted
+access. Those have separate owners and lifecycles; the modules consume their
+identifiers, and neither performs data-source reads. The one exception is
+`modules/self-managed-roles`, which exists only because the self-managed
+StackSet roles have no other source (D13). Stack service roles stay out of
+scope: their permissions are the template's, which no module can know; the
+root README's Prerequisites shows their shape.
 
 ## Interface
 
@@ -76,6 +82,17 @@ Root:
   mode, region concurrency and order.
 - `managed_execution_active` (default `true`).
 - Outputs: `id`, `arn`, `name`, `permission_model`, `stack_instances`.
+
+`modules/self-managed-roles`:
+
+- `role = { administration = {...} | execution = {...} }`: exactly one
+  branch per call. `administration`: `account_id`, `name`,
+  `execution_role_name`, `target_account_ids`, `opt_in_regions`.
+  `execution`: `administration_role_arns`, `name`, `policy_arns`,
+  `inline_policy`.
+- `tags`.
+- Outputs: `role_arn`, `role_name`, `stack_set_permission_model` (the
+  administration call's value for `modules/stack-set`'s `permission_model`).
 
 ## Decisions
 
@@ -322,6 +339,59 @@ resources CloudFormation creates, so the `Name` tag reaches them too; this is
 documented, and a caller who does not want it sets their own `Name`. The
 50-tag limit is checked including the added `Name`.
 
+### D13. The self-managed StackSet roles get their own submodule
+
+A self-managed StackSet does nothing until two roles exist: an
+administration role in the administrator account that CloudFormation
+assumes, and an execution role in every target account that the
+administration role assumes in turn. Under the self-managed model nothing in
+AWS creates them; AWS ships two sample CloudFormation templates and expects
+an operator to deploy them by hand in each account before the first
+StackSet. `modules/stack-set` takes the role ARN and name as inputs, so
+before this submodule a developer had to leave the repository, and
+Terraform, to produce its two required values. That chicken-and-egg is the
+whole reason for `modules/self-managed-roles`. Unlike a stack service role,
+whose permissions are entirely template-specific, the administration role is
+fully determined by AWS's contract and the execution role has a documented
+minimum, so the module can own them without guessing.
+
+Shape. One call creates one role in the provider's account, chosen by a
+two-branch `role` object with an exactly-one validation (the D2 pattern).
+The administration role is created once and the execution role once per
+target account, each with that account's provider; a single module creating
+both would need provider aliases for an unknown number of accounts, which a
+module cannot declare dynamically. The administration call outputs
+`stack_set_permission_model`, the exact value `modules/stack-set` takes, so
+the ARN and the execution role name the StackSet uses always come from the
+role that was actually created.
+
+Faithful to the AWS samples, with documented tightenings only:
+
+- Administration role: same name, same trust principal
+  (`cloudformation.amazonaws.com`), same single permission (`sts:AssumeRole`
+  on `arn:*:iam::*:role/<execution role name>`) and policy name. Added: the
+  `aws:SourceAccount`/`aws:SourceArn` conditions AWS recommends against the
+  confused-deputy problem (which is why `account_id` is a required input:
+  the module does no data-source reads), optional `target_account_ids` to
+  narrow `*`, and regional principals for Regions disabled by default.
+- Execution role: same name; trusts the administration role ARNs instead of
+  the whole administrator account (AWS documents both; the role form means
+  no other principal there can assume it). Permissions: `cloudformation:*`,
+  the minimum AWS documents, and nothing else by default. The sample
+  attaches `AdministratorAccess` and the AWS guide immediately says to scope
+  it down; a module default would make that scoping opt-in, so the caller
+  states the template's needs (`inline_policy`, `policy_arns`) and an
+  advisory check warns if `AdministratorAccess` is attached anyway.
+- Role path is fixed at `/`: StackSets addresses the execution role by bare
+  name, so a path would make it unreachable.
+- `policy_arns` is a map keyed by caller labels, so a policy created in the
+  same apply (unknown ARN) can still be attached.
+
+Out of scope: Organizations trusted access and delegated administrators,
+the service-managed path's prerequisites. AWS creates that path's roles
+itself, and enabling trusted access has no Terraform resource that does it
+the way AWS supports (see `modules/stack-set` README, Prerequisites).
+
 ## Failure-mode analysis
 
 ### Single stack
@@ -366,7 +436,10 @@ defaults (tolerance 0, concurrency 1) stop at the first failure.
 - Stack service role and StackSet administration and execution roles are
   explicit inputs, and the self-managed roles are always sent.
 - No secrets in parameters (documented), no sensitive output, no data
-  sources, no IAM resources created by the module.
+  sources. The root module and `modules/stack-set` create no IAM resources;
+  `modules/self-managed-roles` creates exactly the two StackSets roles, with
+  no permission broader than AWS's samples and the execution role reduced to
+  AWS's documented minimum by default (D13).
 - Tags limited to 50, `aws:`-prefixed keys rejected, and key and value
   length and character set checked at plan.
 - Stack policies supported but opt-in, since the right policy depends on the
@@ -388,6 +461,13 @@ defaults (tolerance 0, concurrency 1) stop at the first failure.
   split between StackSet and instances), `validation` (every validation and
   the two preconditions), `checks`, and one apply-mode output file per
   permission model (an OU instance reports every account it reached).
+- `modules/self-managed-roles/tests/`: `administration` and `execution`
+  (each policy document compared with AWS's sample), `validation`,
+  `checks`, and one apply-mode output file per branch; the administration
+  one also feeds `stack_set_permission_model` into `modules/stack-set` and
+  asserts the StackSet sends both values.
+- `examples/self-managed-bootstrap/tests/wiring` applies the whole example
+  with both providers mocked, proving the three calls compose.
 - `tests/integration/smoke` applies the root module for real with a
   zero-cost `WaitConditionHandle` template and an in-place parameter update.
   There is no StackSet integration suite: it needs Organizations trusted

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Submodule `self-managed-roles`: creates the IAM roles a self-managed StackSet needs, one per call: `role = { administration = {...} }` in the administrator account or `role = { execution = {...} }` in a target account. A translation of AWS's sample templates `AWSCloudFormationStackSetAdministrationRole.yml` and `AWSCloudFormationStackSetExecutionRole.yml`, with the confused-deputy trust conditions AWS recommends, the execution role trusting the administration role ARN instead of the whole administrator account, and the execution role limited to `cloudformation:*` (AWS's documented minimum) plus caller-supplied `inline_policy`/`policy_arns` instead of the sample's `AdministratorAccess`. Outputs `role_arn`, `role_name`, and `stack_set_permission_model`, which plugs directly into `modules/stack-set`'s `permission_model`. Contract tests cover every policy document, validation, and output, and feed the output into `modules/stack-set`.
+
 ### Fixed
 
 - The S3 website-endpoint exclusion on `template.url` (root and `stack-set`) and `stack_policy.url` checked the whole URL for the substring `s3-website`, so a REST-endpoint URL such as `https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml`, or a bucket whose name contains `s3-website`, was wrongly rejected. It now matches only the website-endpoint host forms `<bucket>.s3-website-<region>.amazonaws.com` and `<bucket>.s3-website.<region>.amazonaws.com` (and `.com.cn`).

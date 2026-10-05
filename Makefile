@@ -1,10 +1,12 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := check
 
-ROOT_DIRS     := . modules/stack-set
+ROOT_DIRS     := . modules/stack-set modules/self-managed-roles
 # Only example directories that contain Terraform, so a stray file under examples/ is ignored.
 EXAMPLE_DIRS  := $(sort $(patsubst %/,%,$(dir $(wildcard examples/*/*.tf))))
 ALL_DIRS      := $(ROOT_DIRS) $(EXAMPLE_DIRS)
+# Examples that carry their own credential-free tests are tested too.
+TEST_DIRS     := $(ROOT_DIRS) $(patsubst %/tests/,%,$(sort $(dir $(wildcard examples/*/tests/*.tftest.hcl))))
 TFLINT_CONFIG := $(CURDIR)/.tflint.hcl
 TFDOCS_CONFIG := $(CURDIR)/.terraform-docs.yml
 # Must match the terraform-docs bundled by the CI action (terraform-docs/gh-actions
@@ -45,7 +47,7 @@ lint:
 	done
 
 test:
-	@for dir in $(ROOT_DIRS); do \
+	@for dir in $(TEST_DIRS); do \
 	  echo "==> test $$dir"; \
 	  (cd "$$dir" && terraform test) || exit 1; \
 	done
