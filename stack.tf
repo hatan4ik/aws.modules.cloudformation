@@ -26,4 +26,14 @@ resource "aws_cloudformation_stack" "this" {
     update = var.timeouts.update
     delete = var.timeouts.delete
   }
+
+  lifecycle {
+    # on_failure only governs the first create, and CloudFormation never
+    # returns it, so the provider cannot read it back. Ignoring it keeps an
+    # imported stack (state null), a v1.0.0 stack (state "ROLLBACK"), and a
+    # later on_failure edit from forcing a pointless replacement. A
+    # replacement for any other reason still creates with the configured
+    # value. See docs/DESIGN.md D11.
+    ignore_changes = [on_failure]
+  }
 }

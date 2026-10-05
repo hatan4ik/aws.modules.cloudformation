@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **`on_failure` defaults to `null` and is ignored after create** (`lifecycle { ignore_changes = [on_failure] }`). In 1.0.0 it was non-nullable with default `"ROLLBACK"` and always sent. The provider never reads it back, so importing an existing stack planned a forced replacement. Now an import plans no change for any value. Unset, nothing is sent and CloudFormation applies its own default, `ROLLBACK`, so creation behaves exactly as before. Upgrade impact: none. A stack created by 1.0.0 (`on_failure = "ROLLBACK"` in state) plans no change, and editing `on_failure` on an existing stack no longer replaces it; the new value takes effect the next time the stack is created. Verified with real plans against provider 6.67.0 (see `docs/DESIGN.md` D11).
+
 ## [1.0.0] - 2026-10-05
 
 Initial release.

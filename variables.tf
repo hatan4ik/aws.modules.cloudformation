@@ -76,13 +76,12 @@ variable "capabilities" {
 }
 
 variable "on_failure" {
-  description = "What CloudFormation does when stack creation fails: ROLLBACK (default; the stack ends in ROLLBACK_COMPLETE, which cannot be updated and must be replaced), DELETE (the failed stack is deleted), or DO_NOTHING (the stack stays in CREATE_FAILED with its partial resources, for debugging). Applies to creation only. Changing it replaces the stack."
+  description = "What CloudFormation does when stack creation fails: ROLLBACK (the stack ends in ROLLBACK_COMPLETE, which cannot be updated and must be replaced), DELETE (the failed stack is deleted), or DO_NOTHING (the stack stays in CREATE_FAILED with its partial resources, for debugging). null (the default) sends nothing, and CloudFormation applies ROLLBACK. Applies to creation only: CloudFormation never returns it, so the module ignores changes to it on an existing stack (no replacement), and an imported stack plans no change for any value."
   type        = string
-  default     = "ROLLBACK"
-  nullable    = false
+  default     = null
 
   validation {
-    condition     = contains(["ROLLBACK", "DELETE", "DO_NOTHING"], var.on_failure)
+    condition     = var.on_failure == null ? true : contains(["ROLLBACK", "DELETE", "DO_NOTHING"], var.on_failure)
     error_message = "on_failure must be ROLLBACK, DELETE, or DO_NOTHING."
   }
 }

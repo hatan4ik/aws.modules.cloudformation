@@ -57,7 +57,8 @@ Root:
 
 - `name`; `template = { body | url }`; `parameters` (`map(string)`);
   `capabilities` (set of the three CloudFormation values).
-- `on_failure` (default `ROLLBACK`), `timeout_in_minutes` (default none),
+- `on_failure` (default none, so CloudFormation applies `ROLLBACK`; changes
+  ignored after create, see D11), `timeout_in_minutes` (default none),
   `notification_arns`, `stack_policy = { body | url }` (default none),
   `iam_role_arn` (default none, with an advisory check), `tags`, `timeouts`.
 - Outputs: `id`, `arn` (both the stack ID, which is the ARN), `name`,
@@ -267,15 +268,50 @@ experiments, and the API accepts its absence. It is optional, and
 "valid but usually unintended" treatment the fleet gives to disabled
 deletion protection or logging.
 
-### D11. `on_failure` defaults to `ROLLBACK`
+### D11. `on_failure`: not sent by default, ignored after create
 
-`ROLLBACK` is the API default and keeps the failed stack and its events for
-diagnosis; Terraform's taint-and-replace handles the recovery. `DELETE`
-cleans up instead (events remain readable by stack ID for 90 days) and is
-the better choice for unattended pipelines; `DO_NOTHING` keeps partial
+Behaviour: `ROLLBACK` is the API default and keeps the failed stack and its
+events for diagnosis; Terraform's taint-and-replace handles the recovery.
+`DELETE` cleans up instead (events remain readable by stack ID for 90 days)
+and is the better choice for unattended pipelines; `DO_NOTHING` keeps partial
 resources for debugging. The provider's `disable_rollback` is not exposed:
 the API accepts it or `OnFailure`, not both, and `on_failure` expresses
 everything it does.
+
+Wiring (changed after v1.0.0): `on_failure` defaults to `null`, and the stack
+has `lifecycle { ignore_changes = [on_failure] }`. v1.0.0 sent `"ROLLBACK"`
+unconditionally, which made importing an existing stack a forced
+replacement. The provider's `on_failure` is `Optional` and `ForceNew` but not
+`Computed`, and its Read never sets it (`DescribeStacks` does not return
+`OnFailure`; Read only forces `disable_rollback = false`), so an imported
+stack always has `on_failure = null` in state. Any non-null value in config
+is then a ForceNew diff against null.
+
+`default = null` alone was not enough. It fixes an import that keeps the
+default, but an import with an explicit value is still replaced. Worse, every
+stack created by v1.0.0 has `"ROLLBACK"` in state and would be replaced by
+the upgrade (`"ROLLBACK" -> null # forces replacement`). `ignore_changes` is
+the part that solves it. `on_failure` only governs the first create, so
+replacing a live stack because it changed is never useful. Terraform drops
+ignored values when it replans a replacement, so a stack that is replaced for
+any other reason (rename, taint after a failed create) is still created with
+the configured value. The trade-off is deliberate: editing `on_failure` on an
+existing stack has no effect until that stack is next created.
+
+Evidence: real `terraform plan -refresh=false` runs with hashicorp/aws
+6.67.0 against a state whose stack attributes match what the provider's
+import and Read produce (`on_failure` absent, `disable_rollback = false`):
+
+| Case | State | Config | v1.0.0 | Now |
+| --- | --- | --- | --- | --- |
+| Import, default | null | default | `+ on_failure = "ROLLBACK" # forces replacement` | No changes |
+| Import, explicit | null | `"DELETE"` | replacement | No changes |
+| Upgrade from v1.0.0 | `"ROLLBACK"` | default | n/a | No changes (with `default = null` alone: `"ROLLBACK" -> null # forces replacement`) |
+| Import, then rename | null | `"DELETE"`, new name | replacement | Replaced for the name; new stack created with `on_failure = "DELETE"` |
+| Tainted after failed create | `"ROLLBACK"`, tainted | `"DELETE"` | replacement | Replaced; new stack created with `"DELETE"` |
+
+`tests/on_failure.tftest.hcl` pins the ignore behaviour with the mock
+provider, and fails if `ignore_changes` is removed.
 
 ### D12. Tags: `Name` first, caller wins
 
@@ -297,7 +333,7 @@ documented, and a caller who does not want it sets their own `Name`. The
 | Update fails, rolls back | Apply error; status `UPDATE_ROLLBACK_COMPLETE` | None; previous template still running | Fix and apply; the refreshed template differs from config, so the update is retried. |
 | Update rollback fails | Apply error; status `UPDATE_ROLLBACK_FAILED` | Stack frozen | `continue-update-rollback` (optionally skipping resources), then apply. |
 | Delete fails | Destroy error; status `DELETE_FAILED` | Stack and remaining resources linger | Remove the blocker, destroy again, or `delete-stack --retain-resources`. |
-| Replacement-forcing change (`name`, `on_failure`, `timeout_in_minutes`) | Plan shows `must be replaced` | Every resource in the stack is deleted and recreated | Read the plan; use `DeletionPolicy: Retain` in the template or `prevent_destroy` in the caller for stateful stacks. |
+| Replacement-forcing change (`name`, `timeout_in_minutes`) | Plan shows `must be replaced` | Every resource in the stack is deleted and recreated | Read the plan; use `DeletionPolicy: Retain` in the template or `prevent_destroy` in the caller for stateful stacks. |
 | Template object at `template.url` overwritten | Nothing in Terraform | Next stack update deploys an unreviewed template | Use versioned keys or object lock. |
 
 ### StackSet

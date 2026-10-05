@@ -36,8 +36,8 @@ run "renders_a_minimal_stack_with_api_defaults" {
   }
 
   assert {
-    condition     = aws_cloudformation_stack.this.on_failure == "ROLLBACK"
-    error_message = "on_failure must default to ROLLBACK, the CloudFormation API default."
+    condition     = aws_cloudformation_stack.this.on_failure == null
+    error_message = "on_failure must not be sent by default: CloudFormation then applies its own default, ROLLBACK, and an imported stack (on_failure null in state) plans no change."
   }
 
   assert {

@@ -180,6 +180,14 @@ run "rejects_unknown_on_failure" {
   expect_failures = [var.on_failure]
 }
 
+run "accepts_null_on_failure" {
+  command = plan
+
+  variables {
+    on_failure = null
+  }
+}
+
 run "rejects_zero_timeout_in_minutes" {
   command = plan
 
