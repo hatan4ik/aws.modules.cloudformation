@@ -110,6 +110,45 @@ run "rejects_s3_website_template_url" {
   expect_failures = [var.template]
 }
 
+run "rejects_s3_website_dot_region_template_url" {
+  command = plan
+
+  variables {
+    template = { url = "https://bucket.s3-website.eu-west-1.amazonaws.com/template.yaml" }
+  }
+
+  expect_failures = [var.template]
+}
+
+run "accepts_s3_website_in_the_object_key" {
+  command = plan
+
+  # The website check reads the host only: a REST-endpoint URL whose key
+  # contains s3-website, or a bucket whose name does, is a normal template URL.
+  variables {
+    template     = { url = "https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml" }
+    stack_policy = { url = "https://s3.amazonaws.com/policies/s3-website/policy.json" }
+  }
+}
+
+run "accepts_bucket_named_like_a_website_endpoint" {
+  command = plan
+
+  variables {
+    template = { url = "https://s3-website-assets.s3.eu-west-1.amazonaws.com/template.yaml" }
+  }
+}
+
+run "rejects_s3_website_stack_policy_url" {
+  command = plan
+
+  variables {
+    stack_policy = { url = "https://bucket.s3-website-us-east-1.amazonaws.com/policy.json" }
+  }
+
+  expect_failures = [var.stack_policy]
+}
+
 run "rejects_s3_uri_scheme" {
   command = plan
 

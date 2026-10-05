@@ -35,7 +35,10 @@ variable "template" {
     condition = var.template.url == null ? true : (
       length(var.template.url) <= 5120 &&
       can(regex("^https://([a-z0-9][a-z0-9.-]*\\.)?s3([.-][a-z0-9-]+)*\\.amazonaws\\.com(\\.cn)?/[^[:space:]]+$", var.template.url)) &&
-      !can(regex("s3-website", var.template.url))
+      # Website endpoints only: <bucket>.s3-website-<region> or
+      # <bucket>.s3-website.<region>, matched on the host so an object key
+      # such as templates/s3-website.yaml is not rejected.
+      !can(regex("^https://([^/]*\\.)?s3-website([.-][a-z0-9-]+)?\\.amazonaws\\.com(\\.cn)?/", var.template.url))
     )
     error_message = "template.url must be an https:// Amazon S3 object URL (virtual-hosted or path style) of at most 5,120 characters. S3 static website URLs are not accepted by CloudFormation."
   }
@@ -139,7 +142,10 @@ variable "stack_policy" {
     condition = var.stack_policy == null ? true : var.stack_policy.url == null ? true : (
       length(var.stack_policy.url) <= 5120 &&
       can(regex("^https://([a-z0-9][a-z0-9.-]*\\.)?s3([.-][a-z0-9-]+)*\\.amazonaws\\.com(\\.cn)?/[^[:space:]]+$", var.stack_policy.url)) &&
-      !can(regex("s3-website", var.stack_policy.url))
+      # Website endpoints only: <bucket>.s3-website-<region> or
+      # <bucket>.s3-website.<region>, matched on the host so an object key
+      # such as templates/s3-website.yaml is not rejected.
+      !can(regex("^https://([^/]*\\.)?s3-website([.-][a-z0-9-]+)?\\.amazonaws\\.com(\\.cn)?/", var.stack_policy.url))
     )
     error_message = "stack_policy.url must be an https:// Amazon S3 object URL of at most 5,120 characters. S3 static website URLs are not accepted by CloudFormation."
   }

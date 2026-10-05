@@ -46,7 +46,10 @@ variable "template" {
     condition = var.template.url == null ? true : (
       length(var.template.url) <= 5120 &&
       can(regex("^https://([a-z0-9][a-z0-9.-]*\\.)?s3([.-][a-z0-9-]+)*\\.amazonaws\\.com(\\.cn)?/[^[:space:]]+$", var.template.url)) &&
-      !can(regex("s3-website", var.template.url))
+      # Website endpoints only: <bucket>.s3-website-<region> or
+      # <bucket>.s3-website.<region>, matched on the host so an object key
+      # such as templates/s3-website.yaml is not rejected.
+      !can(regex("^https://([^/]*\\.)?s3-website([.-][a-z0-9-]+)?\\.amazonaws\\.com(\\.cn)?/", var.template.url))
     )
     error_message = "template.url must be an https:// Amazon S3 object URL (virtual-hosted or path style) of at most 5,120 characters. S3 static website URLs are not accepted by CloudFormation."
   }

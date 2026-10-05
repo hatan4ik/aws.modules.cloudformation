@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- The S3 website-endpoint exclusion on `template.url` (root and `stack-set`) and `stack_policy.url` checked the whole URL for the substring `s3-website`, so a REST-endpoint URL such as `https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml`, or a bucket whose name contains `s3-website`, was wrongly rejected. It now matches only the website-endpoint host forms `<bucket>.s3-website-<region>.amazonaws.com` and `<bucket>.s3-website.<region>.amazonaws.com` (and `.com.cn`).
+
 ### Changed
 
 - **`on_failure` defaults to `null` and is ignored after create** (`lifecycle { ignore_changes = [on_failure] }`). In 1.0.0 it was non-nullable with default `"ROLLBACK"` and always sent. The provider never reads it back, so importing an existing stack planned a forced replacement. Now an import plans no change for any value. Unset, nothing is sent and CloudFormation applies its own default, `ROLLBACK`, so creation behaves exactly as before. Upgrade impact: none. A stack created by 1.0.0 (`on_failure = "ROLLBACK"` in state) plans no change, and editing `on_failure` on an existing stack no longer replaces it; the new value takes effect the next time the stack is created. Verified with real plans against provider 6.67.0 (see `docs/DESIGN.md` D11).

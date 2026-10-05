@@ -98,6 +98,35 @@ run "rejects_non_s3_template_url" {
   expect_failures = [var.template]
 }
 
+run "rejects_s3_website_template_url" {
+  command = plan
+
+  variables {
+    template = { url = "https://bucket.s3-website-us-east-1.amazonaws.com/template.yaml" }
+  }
+
+  expect_failures = [var.template]
+}
+
+run "rejects_s3_website_dot_region_template_url" {
+  command = plan
+
+  variables {
+    template = { url = "https://bucket.s3-website.eu-west-1.amazonaws.com/template.yaml" }
+  }
+
+  expect_failures = [var.template]
+}
+
+run "accepts_s3_website_in_the_object_key" {
+  command = plan
+
+  # The website check reads the host only, not the object key.
+  variables {
+    template = { url = "https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml" }
+  }
+}
+
 run "rejects_more_than_200_parameters" {
   command = plan
 
