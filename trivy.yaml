@@ -1,0 +1,7 @@
+# tests/integration/setup is the reserved location for short-lived fixture
+# infrastructure created and destroyed by the integration suites in the
+# caller's own account; it is not a deployable pattern and is excluded from
+# misconfiguration scanning. The smoke suite needs no fixtures today.
+scan:
+  skip-dirs:
+    - tests/integration/setup
