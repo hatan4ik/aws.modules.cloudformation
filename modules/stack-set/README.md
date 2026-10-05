@@ -37,11 +37,92 @@ module "audit_role_baseline" {
 }
 ```
 
+## Prerequisites
+
+A StackSet needs permission to deploy into other accounts before this module can do anything, and the two permission models get it from different places. Set them up once, before the first apply.
+
+### Self-managed: two IAM roles
+
+Every self-managed StackSet needs an **administration role** in the account that owns the StackSet and an **execution role** in every target account that trusts it. Nothing in AWS creates them under this model. [`modules/self-managed-roles`](../self-managed-roles) does, and its `stack_set_permission_model` output is this module's `permission_model`:
+
+```hcl
+permission_model = module.stack_set_administration_role.stack_set_permission_model
+```
+
+[`examples/self-managed-bootstrap`](../../examples/self-managed-bootstrap) is the full chain in one configuration. Also needed: `iam:PassRole` on the administration role for whoever runs Terraform. The self-managed model needs no AWS Organizations setup at all.
+
+### Service-managed: AWS Organizations, in this order
+
+AWS creates the deployment roles in member accounts itself, but only after the organization is set up for it. Steps 1 to 3 run **in the organization's management account**, as an administrator; follow them top to bottom.
+
+1. **The organization must have all features enabled.** With only consolidated billing, a service-managed StackSet cannot be created. Check:
+
+   ```sh
+   aws organizations describe-organization --query Organization.FeatureSet --output text   # must print ALL
+   ```
+
+   If it prints `CONSOLIDATED_BILLING`, enable all features. This sends a handshake to every *invited* member account, and the change completes only after each of them accepts and the management account accepts the final `ENABLE_ALL_FEATURES` handshake; accounts created from the organization need no action:
+
+   ```sh
+   aws organizations enable-all-features
+   aws organizations list-handshakes-for-organization   # track acceptance
+   ```
+
+   If the organization is managed in Terraform, `aws_organizations_organization` with `feature_set = "ALL"` calls the same `EnableAllFeatures` (it starts the handshake; it does not wait for the accounts to accept).
+
+2. **Activate trusted access for StackSets.** This is a CloudFormation API call, not an Organizations one:
+
+   ```sh
+   aws cloudformation activate-organizations-access
+   aws cloudformation describe-organizations-access --query Status --output text        # must print ENABLED
+   ```
+
+   It also creates the service-linked role `AWSServiceRoleForCloudFormationStackSetsOrgAdmin` in the management account; the per-member `AWSServiceRoleForCloudFormationStackSetsOrgMember` roles and `stacksets-exec-*` roles are created when a StackSet first deploys to an account. The console equivalent is the **Activate trusted access** banner on the CloudFormation StackSets page.
+
+   **No Terraform resource does this.** The AWS provider (checked up to 6.67.0) has no resource that calls `ActivateOrganizationsAccess`. `aws_organizations_aws_service_access` and the `aws_service_access_principals` argument of `aws_organizations_organization` call the Organizations `EnableAWSServiceAccess` API instead, and AWS states that trusted access for StackSets can only be enabled through CloudFormation (the CloudFormation API also creates the service-linked role above); the provider's own documentation recommends each service's own tooling over that resource for the same reason. Run the CLI command once, by hand or from your landing-zone pipeline.
+
+   If your `aws_organizations_organization` manages `aws_service_access_principals`, Terraform treats that list as the complete set of enabled services and disables any other one on the next apply. Run `aws organizations list-aws-service-access-for-organization` after step 2 and add every StackSets principal it shows to the list (Terraform then makes no call for it). Disabling trusted access programmatically removes StackSets' permissions in the organization; AWS recommends doing it only from the CloudFormation console, and every delegated administrator must be deregistered first.
+
+3. **Register a delegated administrator (only for `call_as = "DELEGATED_ADMIN"`).** A delegated administrator runs StackSets from a member account, which keeps day-to-day StackSets work (and its credentials) out of the management account; skip this step for `call_as = "SELF"`. Trusted access (step 2) must already be active, and the account must be a member of the organization. At most five accounts can be registered at once, and AWS lists the Regions where delegated administrators can be registered: us-east-1, us-east-2, us-west-1, us-west-2, ap-south-1, ap-northeast-1, ap-northeast-2, ap-southeast-1, ap-southeast-2, ca-central-1, eu-central-1, eu-west-1, eu-west-2, eu-west-3, eu-north-1, il-central-1, sa-east-1, us-gov-east-1, and us-gov-west-1.
+
+   ```sh
+   aws organizations register-delegated-administrator \
+     --service-principal=member.org.stacksets.cloudformation.amazonaws.com \
+     --account-id=<member-account-id>
+   aws organizations list-delegated-administrators \
+     --service-principal=member.org.stacksets.cloudformation.amazonaws.com   # verify
+   ```
+
+   Unlike step 2, this one has a Terraform resource, run with management-account credentials:
+
+   ```hcl
+   resource "aws_organizations_delegated_administrator" "stacksets" {
+     account_id        = "222222222222"
+     service_principal = "member.org.stacksets.cloudformation.amazonaws.com"
+   }
+   ```
+
+   A delegated administrator can deploy to every account in the organization; the management account cannot limit it to particular OUs or operations.
+
+4. **Permissions of the identity that runs Terraform** (in the management account for `SELF`, in the delegated administrator account for `DELEGATED_ADMIN`): permission to manage StackSets and their instances (`cloudformation:*StackSet*` and `cloudformation:*StackInstance*` cover every call this module makes, including the operation polling), plus `organizations:ListDelegatedAdministrators` for a delegated administrator, which AWS calls out explicitly. Operations started by a delegated administrator are still performed by the management account.
+
+   Check that a delegated administrator sees trusted access:
+
+   ```sh
+   aws cloudformation describe-organizations-access --call-as DELEGATED_ADMIN --query Status --output text
+   ```
+
+Then set `permission_model.service_managed.call_as` to match where Terraform runs, and target OU or root IDs from `aws organizations list-roots` / `list-organizational-units-for-parent`. CloudFormation never deploys a service-managed StackSet to the management account, even when its OU or the root is targeted; manage anything the management account needs separately. Service-managed StackSets also cannot target accounts outside the organization, and do not support nested stacks or templates with macros or transforms.
+
+To deploy to a Region that is disabled by default (opt-in), enable that Region in the administrator or management account as well as in the target accounts.
+
+AWS sources: [Activate trusted access](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-orgs-activate-trusted-access.html), [Register a delegated administrator](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-orgs-delegated-admin.html), [CloudFormation StackSets and AWS Organizations](https://docs.aws.amazon.com/organizations/latest/userguide/services-that-can-integrate-cloudformation.html), [Create StackSets with service-managed permissions](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-orgs-associate-stackset-with-org.html), [Grant self-managed permissions](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-prereqs-self-managed.html), [Regions disabled by default](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/stacksets-opt-in-regions.html).
+
 ## Behaviour
 
 - Permission model. `permission_model` is an object with two mutually exclusive branches, so the inputs of one model cannot be given to the other:
-  - `self_managed = { administration_role_arn, execution_role_name }`: you created `administration_role_arn` in this account and a role named `execution_role_name` (default `AWSCloudFormationStackSetExecutionRole`) in every target account that trusts it. Both are always sent, so who deploys what is explicit. Targets are 12-digit account IDs.
-  - `service_managed = { auto_deployment = { enabled, retain_stacks_on_account_removal }, call_as }`: AWS Organizations trusted access creates the roles. `auto_deployment` is required: `enabled` decides whether accounts joining a targeted OU get an instance automatically, and `retain_stacks_on_account_removal` (default `false`) whether an account leaving keeps its stack. `call_as` is `SELF` (management account, the default) or `DELEGATED_ADMIN`. Targets are OU IDs or the root ID. `CAPABILITY_AUTO_EXPAND` is rejected, because service-managed StackSets do not support macros or transforms.
+  - `self_managed = { administration_role_arn, execution_role_name }`: you created `administration_role_arn` in this account and a role named `execution_role_name` (default `AWSCloudFormationStackSetExecutionRole`) in every target account that trusts it (for example with [`modules/self-managed-roles`](../self-managed-roles)). Both are always sent, so who deploys what is explicit. Targets are 12-digit account IDs.
+  - `service_managed = { auto_deployment = { enabled, retain_stacks_on_account_removal }, call_as }`: AWS Organizations trusted access creates the roles. `auto_deployment` is required: `enabled` decides whether accounts joining a targeted OU get an instance automatically, and `retain_stacks_on_account_removal` (default `false`) whether an account leaving keeps its stack. `call_as` is `SELF` (management account, the default) or `DELEGATED_ADMIN`. Targets are OU IDs or the root ID. A template with macros or transforms fails for this model (see [Failure modes](#failure-modes)). The organization must be set up first; see [Prerequisites](#prerequisites).
 - Instances. Each `stack_instances` key is `"<target>/<region>"` and becomes one instance resource: for `self_managed`, a stack in that one account; for `service_managed`, a stack in every account of that OU (or of the whole organization, for `r-...`). The key is the identity, so the same target and region cannot be declared twice. A key whose target does not match the permission model fails the plan with every offending key named. `parameter_overrides` replaces StackSet parameter values for one instance; `retain_stack = true` keeps the stack in the target account when the instance is removed.
 - Operation preferences. `operation_preferences` is split between the two resources. The StackSet gets the account-level settings plus `region_concurrency_type` and `region_order`; they govern template and parameter updates, which roll out to every existing instance in one operation. Each instance gets the account-level settings plus `concurrency_mode` for its own create, update, and delete; region ordering does not apply to an operation that targets one region. Unset, no block is sent and CloudFormation's defaults apply: failure tolerance 0, one account at a time.
 - Managed execution is on by default (`managed_execution_active = true`, where the API default is off). Terraform creates the instances of one StackSet in parallel, and without managed execution every operation after the first fails with `OperationInProgressException`; with it, StackSets queues them.

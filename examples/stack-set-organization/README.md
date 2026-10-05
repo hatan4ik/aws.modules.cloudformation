@@ -10,7 +10,7 @@ What to look at:
 - `operation_preferences` bounds the blast radius of a bad template: at most two accounts in flight, and the operation stops in a region, and skips the remaining regions, once more than one account has failed. A template update to this StackSet rolls out under the same rules. See the submodule README, [Failure modes](../../modules/stack-set/README.md#failure-modes).
 - Every template parameter is declared, including `RoleName`, which has a `Default` in the template.
 
-Prerequisites: trusted access for CloudFormation StackSets enabled in AWS Organizations and, for `DELEGATED_ADMIN`, the account registered as a delegated administrator.
+Prerequisites: an organization with all features enabled, trusted access for StackSets activated (`aws cloudformation activate-organizations-access`, which no Terraform resource does), and, for `DELEGATED_ADMIN`, the account registered as a delegated administrator. The ordered steps, with commands, are in the submodule README, [Prerequisites](../../modules/stack-set/README.md#prerequisites).
 
 ## Run
 
