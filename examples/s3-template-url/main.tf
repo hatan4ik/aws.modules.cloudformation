@@ -3,8 +3,9 @@ provider "aws" {
 }
 
 # A vendor or AWS Marketplace solution delivered as a template in S3. The URL
-# should name an immutable, versioned object (a version in the key, or a
-# bucket with object lock), so the same plan always deploys the same template.
+# should pin the object version (?versionId=...), so the same plan always
+# deploys the same template and a new template is a visible change to the
+# URL; without it, check.template_url_not_version_pinned warns.
 module "marketplace_solution" {
   source = "../../"
 

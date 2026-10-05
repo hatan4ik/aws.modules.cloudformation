@@ -2,7 +2,7 @@ mock_provider "aws" {}
 
 variables {
   name     = "vendor-agent"
-  template = { url = "https://vendor-templates.s3.amazonaws.com/agent.yaml" }
+  template = { url = "https://vendor-templates.s3.amazonaws.com/agent.yaml?versionId=3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY" }
 }
 
 run "warns_without_a_service_role" {

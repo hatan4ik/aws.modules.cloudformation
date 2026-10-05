@@ -23,7 +23,7 @@ module "vendor_agent" {
   source = "git::https://github.com/hatan4ik/aws.modules.cloudformation.git?ref=<commit-sha>" # v1.0.0
 
   name     = "vendor-agent"
-  template = { url = "https://vendor-templates.s3.us-east-1.amazonaws.com/agent/v4.2.0/agent.yaml" }
+  template = { url = "https://vendor-templates.s3.us-east-1.amazonaws.com/agent/v4.2.0/agent.yaml?versionId=3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY" }
 
   parameters = {
     AgentName     = "vendor-agent"
@@ -194,14 +194,16 @@ For StackSets, see [`modules/stack-set`](modules/stack-set) and [`examples/stack
 root (one stack)
 ├── stack.tf       aws_cloudformation_stack.this
 ├── variables.tf   every input, with the XOR and limit validations
-├── locals.tf      tags (Name, then caller tags)
-├── checks.tf      service_role_not_set (advisory)
+├── locals.tf      tags (Name, then caller tags); inputs of the template checks
+├── checks.tf      service_role_not_set, template_url_not_version_pinned,
+│                  stack_policy_url_not_version_pinned, template_body_not_a_mapping (advisory)
 └── outputs.tf     id, arn, name, outputs
 
 modules/stack-set (one StackSet, N instances)
 ├── main.tf        aws_cloudformation_stack_set.this; aws_cloudformation_stack_set_instance.this["<target>/<region>"]
 ├── locals.tf      permission model, key splitting, operation preference split
-├── checks.tf      no_stack_instances, max_concurrency_capped_by_failure_tolerance (advisory)
+├── checks.tf      no_stack_instances, max_concurrency_capped_by_failure_tolerance,
+│                  template_url_not_version_pinned, template_body_not_a_mapping (advisory)
 └── outputs.tf     id, arn, name, permission_model, stack_instances
 
 modules/self-managed-roles (one IAM role per call)
@@ -258,9 +260,49 @@ StackSets fail differently (per account and region, inside one operation); see [
 - Least privilege by role. With `iam_role_arn`, CloudFormation uses that role for every operation on the stack, and keeps using it even for callers who could not pass it themselves. Grant the role exactly what the template creates. Without it, the stack runs with whatever the Terraform caller can do, and `check.service_role_not_set` warns on every plan.
 - No capability by default. A template that creates IAM resources or uses transforms fails with `InsufficientCapabilities` until the caller lists the capability. Review a template before acknowledging `CAPABILITY_NAMED_IAM` or `CAPABILITY_AUTO_EXPAND`: a transform runs a Lambda function that its owner can change without you.
 - Parameters are not secret. `parameters` values are stored in plan and state in clear text, and the module does not mark them sensitive. `NoEcho` parameters read back from CloudFormation as `****`, which shows a diff on every plan. Resolve secrets inside the template with a dynamic reference (`{{resolve:secretsmanager:...}}` or `{{resolve:ssm-secure:...}}`) instead.
-- Pin the template. A `template.url` whose object can be overwritten deploys whatever is there at apply time, and Terraform cannot see the change. Use a versioned key or a bucket with versioning and object lock.
+- Pin the template. A `template.url` whose object can be overwritten deploys whatever is there at apply time, and Terraform cannot see the change. Pin the object version with `?versionId=`; see [Template immutability](#template-immutability).
 - Stack policies are opt-in. `stack_policy` can deny `Update:Replace` and `Update:Delete` for stateful resources; with none, every resource in the stack can be replaced by an update.
 - Tags propagate. CloudFormation copies stack tags, including `Name`, to every resource in the stack that supports tags.
+
+## Template immutability
+
+**A static S3 URL gives Terraform no drift detection.** Terraform updates a stack only when an argument's value changes. `template.url` is a string; if someone overwrites the S3 object behind it, the string is the same, so `terraform plan` reports no changes, `UpdateStack` is never called, and the stack keeps running the old template while the configuration claims it runs the new one. (A later update for any other reason, such as a parameter change, would then silently pick up the new object.) The same holds for `stack_policy.url`, and for `modules/stack-set`, where the stale template is the one in every account.
+
+**The fix is a version-pinned URL.** With versioning enabled on the bucket, every write of an object gets a new `versionId`, and CloudFormation accepts a URL that names one: `https://<bucket>.s3.<region>.amazonaws.com/<key>?versionId=<id>`. That URL changes as a string whenever the object does, which is exactly what Terraform compares. Reading a specific version needs `s3:GetObjectVersion` (not only `s3:GetObject`) for the identity that calls CloudFormation.
+
+When the same configuration uploads the template, read `version_id` from the object resource (`aws_s3_object`, or the deprecated `aws_s3_bucket_object`); it is known after the upload, so a changed file re-uploads, gets a new version, and updates the stack in the same apply:
+
+```hcl
+resource "aws_s3_bucket_versioning" "templates" {
+  bucket = aws_s3_bucket.templates.id
+  versioning_configuration { status = "Enabled" }
+}
+
+resource "aws_s3_object" "vendor_agent" {
+  bucket = aws_s3_bucket_versioning.templates.bucket # versioning on before the first upload
+  key    = "vendor-agent/agent.yaml"
+  source = "${path.module}/vendor-agent.yaml"
+
+  # Re-upload when the file changes; the provider then marks version_id
+  # unknown, so the stack update is planned in the same run.
+  source_hash = filemd5("${path.module}/vendor-agent.yaml")
+}
+
+module "vendor_agent" {
+  source = "git::https://github.com/hatan4ik/aws.modules.cloudformation.git?ref=<commit-sha>"
+
+  name     = "vendor-agent"
+  template = { url = "https://${aws_s3_bucket.templates.bucket_regional_domain_name}/${aws_s3_object.vendor_agent.key}?versionId=${aws_s3_object.vendor_agent.version_id}" }
+}
+```
+
+When a separate pipeline (or a vendor) publishes the object, take the `VersionId` its upload returned (`aws s3api put-object` prints it; `aws s3api list-object-versions --bucket <bucket> --prefix <key>` lists them) and append `?versionId=<id>` to the URL you pass in. A new template is then a reviewed change to that string, not an invisible overwrite.
+
+A content-addressed key (a new key per content, as in [Prerequisites](#prerequisites)) also changes the URL whenever the content does, as long as nobody overwrites a key. Versioning makes that guarantee hold even when someone does; appending `?versionId=` to such a URL costs nothing.
+
+**Advisory checks.** `check.template_url_not_version_pinned` (and `check.stack_policy_url_not_version_pinned` in the root) warns on every plan when the URL is an Amazon S3 object URL (virtual-hosted or path style, including GovCloud and the `amazonaws.com.cn` China partition) without a `versionId` query parameter. It is a warning, not an error: a bucket owner may have chosen not to version, with object lock or a never-reused key instead. A non-S3 URL never reaches it, because CloudFormation reads templates only from S3 and the `url` validation rejects anything else.
+
+**Or sidestep it with `template.body`.** An inline template is the value Terraform compares, so any content change is a diff, reviewed in the same plan. It is limited to 51,200 bytes ([Prerequisites](#prerequisites) has the limits table); above that, use a pinned URL.
 
 ## Lifecycle notes
 

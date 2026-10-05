@@ -392,6 +392,95 @@ the service-managed path's prerequisites. AWS creates that path's roles
 itself, and enabling trusted access has no Terraform resource that does it
 the way AWS supports (see `modules/stack-set` README, Prerequisites).
 
+### D14. Template immutability: warn on an S3 URL without `versionId`
+
+The defect. Terraform calls `UpdateStack` (or `UpdateStackSet`) only when an
+argument's value differs from state. `template_url` is a string. When the S3
+object behind it is overwritten, the string is unchanged, the plan is empty,
+and the stack keeps running the old template while the configuration claims
+the new one. Nothing ever surfaces it; worse, the next update for an
+unrelated reason (a parameter edit) picks up the new object as a side effect
+nobody reviewed. For a StackSet the stale template is the one in every target
+account. `stack_policy.url` has the same flaw for the stack policy. This
+breaks the module's basic promise that what is declared is what runs.
+
+The fix the caller applies. With bucket versioning on, S3 gives every write a
+new `versionId`, and CloudFormation accepts a template URL that names one
+(`?versionId=<id>`, documented in the CloudFormation user guide for
+versioning-enabled buckets). That URL changes as a string whenever the
+object does, so Terraform sees the change and updates the stack. The version
+comes from `aws_s3_object.version_id` (or the deprecated
+`aws_s3_bucket_object`) when the same configuration uploads the object, which
+the provider marks unknown whenever the content changes, so the upload and
+the stack update happen in one apply; or from the `VersionId` an external
+pipeline's upload returns, appended to the URL the caller passes. Reading a
+version needs `s3:GetObjectVersion` for the identity that calls
+CloudFormation. `template.body` avoids the problem entirely, because the
+content is the compared value; its 51,200-byte limit (D7, README
+Prerequisites) is the only reason to prefer a URL.
+
+What the module does. Two advisory checks, `template_url_not_version_pinned`
+(root and `modules/stack-set`) and `stack_policy_url_not_version_pinned`
+(root), fail when the URL matches the S3 object URL host pattern (the same
+pattern the `url` validations accept: virtual-hosted, legacy global and
+`s3-<region>`, path style, dualstack and FIPS, GovCloud, and
+`amazonaws.com.cn`) and has no `versionId` query parameter (`[?&]versionId=`,
+so `versionId=` inside the key does not count).
+
+Why a check and not a validation. An unpinned URL is valid and sometimes
+deliberate: a bucket owner may use a never-reused, content-addressed key, or
+object lock, instead of versioning, and the module cannot see which. The
+fleet's rule for "valid but usually unintended" is an advisory check (D10).
+The host-pattern guard means a non-S3 URL is never flagged; today none
+reaches the check, because CloudFormation reads templates only from S3 and
+the `url` validation rejects anything else, but the check stays correct if
+that validation is ever widened (for example to Systems Manager document
+URLs).
+
+Not done: reading the object's current version with a data source, which
+would detect drift without the caller's help but would add the module's
+first data-source read and an S3 read permission to every plan.
+
+### D16. A body that parses but is not a template mapping gets an advisory check
+
+The brief asked for plan-time syntax pre-validation of `template.body`:
+warn when neither `jsondecode` nor `yamldecode` parses it. Two findings
+changed the design.
+
+1. `yamldecode` rejects every CloudFormation short-form intrinsic. Verified
+   on Terraform 1.7.5 and 1.16.5: `yamldecode("a: !Ref X")` fails with
+   `unsupported tag "!Ref"`, and the same for `!GetAtt`, `!Sub`, `!Join`,
+   `!If`, `!Equals`, `!Not`, `!Condition`, `!Base64`, `!GetAZs`,
+   `!Transform`, `!Length`, `!ToJsonString`, in flow and block style. Only
+   standard `!!` tags decode. A naive check would warn on almost every real
+   YAML template.
+2. The provider already validates syntax. `aws_cloudformation_stack` and
+   `aws_cloudformation_stack_set` reject a `template_body` that is not valid
+   JSON or YAML at plan, as a hard error that names the line and column
+   (verified with the mock provider on 6.35.0 and 6.67.0: bad indentation,
+   tab indentation, unclosed flow sequences and quotes, unclosed JSON,
+   trailing commas in JSON), and accept short-form tags. A module check for
+   syntax errors would never be reported, because the provider error stops
+   the plan first.
+
+What the provider accepts and CloudFormation does not is a body that is
+valid JSON or YAML but not a mapping. The common case is a file path passed
+as the body (`body = "stack.yaml"` instead of `body = file("stack.yaml")`),
+which is a valid YAML string and fails only at apply. So the check is
+`template_body_not_a_mapping`: it passes when `keys(jsondecode(body))`
+succeeds, or `keys(yamldecode(body'))` succeeds where `body'` is the body
+with every local tag (`!` and a name, at the start of a node) removed. The
+removal turns `!GetAtt [B, Arn]` into `[B, Arn]` and `!Ref X` into `X`,
+which keeps the document's structure; removing text inside a quoted string
+or a block scalar cannot make valid YAML invalid. It was checked against
+every template in this repository and a template exercising all short-form
+functions with no false warning.
+
+It is an advisory check, not a precondition, because the tag removal is a
+heuristic over a grammar Terraform does not implement, and CloudFormation's
+parser is the authority. A false warning costs a line of output; a false
+precondition would block a valid template.
+
 ## Failure-mode analysis
 
 ### Single stack
@@ -452,15 +541,19 @@ defaults (tolerance 0, concurrency 1) stop at the first failure.
   `defaults` (every argument the module sends, boundaries such as 200
   parameters, 50 tags, and a template of exactly 51,200 bytes with a
   multi-byte character), `validation` (every validation with a failing run),
-  `checks` (the advisory check on and off), and `outputs` (apply mode with
+  `checks` (the advisory check on and off), `template_checks` (D14 and D16:
+  pinned and unpinned URLs in every S3 host form, a real short-form YAML
+  template that `yamldecode` alone rejects, and bodies that are not
+  mappings), and `outputs` (apply mode with
   `override_resource`, isolated in its own file, proving every output
   resolves from the right attribute).
 - `modules/stack-set/tests/`: `self_managed` and `service_managed` (both
   permission-model variants end to end, including OU and root targets,
   delegated admin, auto-deployment on and off), `operation_preferences` (the
   split between StackSet and instances), `validation` (every validation and
-  the two preconditions), `checks`, and one apply-mode output file per
-  permission model (an OU instance reports every account it reached).
+  the two preconditions), `checks`, `template_checks`, and one apply-mode
+  output file per permission model (an OU instance reports every account it
+  reached).
 - `modules/self-managed-roles/tests/`: `administration` and `execution`
   (each policy document compared with AWS's sample), `validation`,
   `checks`, and one apply-mode output file per branch; the administration

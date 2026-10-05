@@ -7,7 +7,7 @@ mock_provider "aws" {}
 
 variables {
   name     = "org-guardduty-baseline"
-  template = { url = "https://baseline-templates.s3.amazonaws.com/guardduty.yaml" }
+  template = { url = "https://baseline-templates.s3.amazonaws.com/guardduty.yaml?versionId=Kq2c8eTP" }
 
   permission_model = {
     service_managed = {

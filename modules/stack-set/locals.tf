@@ -36,4 +36,20 @@ locals {
     for name, value in var.operation_preferences : name => value
     if value != null && !contains(["region_concurrency_type", "region_order"], name)
   }
+
+  # Inputs of the template advisory checks in checks.tf, the same as the root
+  # module's; see docs/DESIGN.md D14 and D16. S3 object URL hosts, as the url
+  # validation accepts them: virtual-hosted, path style, dualstack and FIPS,
+  # GovCloud, and China (amazonaws.com.cn).
+  s3_url_pattern        = "^https://([a-z0-9][a-z0-9.-]*\\.)?s3([.-][a-z0-9-]+)*\\.amazonaws\\.com(\\.cn)?/"
+  s3_version_id_pattern = "[?&]versionId=[^&#]+"
+  template_url_unpinned = var.template.url == null ? false : can(regex(local.s3_url_pattern, var.template.url)) && !can(regex(local.s3_version_id_pattern, var.template.url))
+
+  # yamldecode rejects CloudFormation short-form tags (!Ref, !GetAtt, ...);
+  # removing a local tag leaves the tagged value as plain YAML.
+  cfn_short_form_tag_pattern = "/(^|[\\s\\[{,])![A-Za-z][A-Za-z0-9:]*/"
+  template_body_not_a_mapping = var.template.body == null ? false : !(
+    can(keys(jsondecode(var.template.body))) ||
+    can(keys(yamldecode(replace(var.template.body, local.cfn_short_form_tag_pattern, "$1"))))
+  )
 }

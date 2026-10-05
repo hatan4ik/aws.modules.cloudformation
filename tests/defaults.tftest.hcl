@@ -65,7 +65,7 @@ run "renders_every_optional_input" {
   command = plan
 
   variables {
-    template           = { url = "https://vendor-templates.s3.us-east-1.amazonaws.com/agent/v4.2/agent.yaml" }
+    template           = { url = "https://vendor-templates.s3.us-east-1.amazonaws.com/agent/v4.2/agent.yaml?versionId=3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY" }
     parameters         = { InstanceCount = "3", Subnets = "subnet-0123456789abcdef0,subnet-0fedcba9876543210" }
     capabilities       = ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
     on_failure         = "DELETE"
@@ -77,7 +77,7 @@ run "renders_every_optional_input" {
   }
 
   assert {
-    condition     = aws_cloudformation_stack.this.template_url == "https://vendor-templates.s3.us-east-1.amazonaws.com/agent/v4.2/agent.yaml"
+    condition     = aws_cloudformation_stack.this.template_url == "https://vendor-templates.s3.us-east-1.amazonaws.com/agent/v4.2/agent.yaml?versionId=3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY"
     error_message = "template.url must pass through as template_url."
   }
 
@@ -121,11 +121,11 @@ run "sends_a_stack_policy_url_alone" {
   command = plan
 
   variables {
-    stack_policy = { url = "https://s3.amazonaws.com/policies-bucket/stack-policy.json" }
+    stack_policy = { url = "https://s3.amazonaws.com/policies-bucket/stack-policy.json?versionId=Lp8q1" }
   }
 
   assert {
-    condition     = aws_cloudformation_stack.this.policy_url == "https://s3.amazonaws.com/policies-bucket/stack-policy.json"
+    condition     = aws_cloudformation_stack.this.policy_url == "https://s3.amazonaws.com/policies-bucket/stack-policy.json?versionId=Lp8q1"
     error_message = "A stack policy URL must be sent as policy_url."
   }
 }

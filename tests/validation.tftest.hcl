@@ -5,7 +5,7 @@ mock_provider "aws" {}
 
 variables {
   name         = "vendor-agent"
-  template     = { url = "https://vendor-templates.s3.us-east-1.amazonaws.com/agent.yaml" }
+  template     = { url = "https://vendor-templates.s3.us-east-1.amazonaws.com/agent.yaml?versionId=3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY" }
   iam_role_arn = "arn:aws:iam::123456789012:role/vendor-agent-deployer"
 }
 
@@ -126,8 +126,8 @@ run "accepts_s3_website_in_the_object_key" {
   # The website check reads the host only: a REST-endpoint URL whose key
   # contains s3-website, or a bucket whose name does, is a normal template URL.
   variables {
-    template     = { url = "https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml" }
-    stack_policy = { url = "https://s3.amazonaws.com/policies/s3-website/policy.json" }
+    template     = { url = "https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml?versionId=1" }
+    stack_policy = { url = "https://s3.amazonaws.com/policies/s3-website/policy.json?versionId=1" }
   }
 }
 
@@ -135,7 +135,7 @@ run "accepts_bucket_named_like_a_website_endpoint" {
   command = plan
 
   variables {
-    template = { url = "https://s3-website-assets.s3.eu-west-1.amazonaws.com/template.yaml" }
+    template = { url = "https://s3-website-assets.s3.eu-west-1.amazonaws.com/template.yaml?versionId=1" }
   }
 }
 

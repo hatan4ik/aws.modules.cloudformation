@@ -11,7 +11,7 @@ variable "name" {
 }
 
 variable "template_url" {
-  description = "https:// URL of the vendor's template object in Amazon S3, ideally a versioned key."
+  description = "https:// URL of the vendor's template object in Amazon S3, pinned to an object version with ?versionId=<id>."
   type        = string
 }
 

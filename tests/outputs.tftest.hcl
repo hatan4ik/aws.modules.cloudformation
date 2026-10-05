@@ -8,7 +8,7 @@ mock_provider "aws" {}
 
 variables {
   name         = "vendor-agent"
-  template     = { url = "https://vendor-templates.s3.us-east-1.amazonaws.com/agent.yaml" }
+  template     = { url = "https://vendor-templates.s3.us-east-1.amazonaws.com/agent.yaml?versionId=3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY" }
   iam_role_arn = "arn:aws:iam::123456789012:role/vendor-agent-deployer"
 }
 

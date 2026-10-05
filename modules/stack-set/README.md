@@ -11,7 +11,7 @@ module "audit_role_baseline" {
   source = "git::https://github.com/hatan4ik/aws.modules.cloudformation.git//modules/stack-set?ref=<commit-sha>" # v1.0.0
 
   name     = "security-audit-role"
-  template = { url = "https://baseline-templates.s3.us-east-1.amazonaws.com/audit-role/v3.yaml" }
+  template = { url = "https://baseline-templates.s3.us-east-1.amazonaws.com/audit-role/v3.yaml?versionId=Kq2c8eTP" }
 
   parameters   = { SecurityAccountId = "111111111111", RoleName = "security-audit" }
   capabilities = ["CAPABILITY_NAMED_IAM"]
@@ -128,6 +128,7 @@ AWS sources: [Activate trusted access](https://docs.aws.amazon.com/AWSCloudForma
 - Managed execution is on by default (`managed_execution_active = true`, where the API default is off). Terraform creates the instances of one StackSet in parallel, and without managed execution every operation after the first fails with `OperationInProgressException`; with it, StackSets queues them.
 - Parameters. Declare every template parameter in `parameters`, including ones with a `Default`: the provider does not read template defaults back for a StackSet, so an omitted one shows a diff on every plan. `NoEcho` parameters are not supported; they read back as `****` and diff on every plan. Use a dynamic reference in the template instead.
 - Tags. The module adds `Name = name`; a caller's `Name` wins. StackSet tags propagate to every instance stack and to the supported resources in it.
+- Template immutability. Pin `template.url` to an object version (`?versionId=<id>`). A StackSet whose S3 object is overwritten behind an unchanged URL is never updated, in any account, because Terraform sees no change; `check.template_url_not_version_pinned` warns about an unpinned S3 URL. `check.template_body_not_a_mapping` warns about a body that parses but is not a template (such as a file path passed without `file()`). See the root README, [Template immutability](../../README.md#template-immutability).
 
 ## Failure modes
 

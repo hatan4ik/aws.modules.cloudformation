@@ -2,7 +2,7 @@ mock_provider "aws" {}
 
 variables {
   name     = "baseline-config"
-  template = { url = "https://baseline-templates.s3.amazonaws.com/config.yaml" }
+  template = { url = "https://baseline-templates.s3.amazonaws.com/config.yaml?versionId=Kq2c8eTP" }
 
   permission_model = {
     service_managed = {

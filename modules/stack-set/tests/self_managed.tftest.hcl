@@ -2,7 +2,7 @@ mock_provider "aws" {}
 
 variables {
   name     = "baseline-config"
-  template = { url = "https://baseline-templates.s3.us-east-1.amazonaws.com/config/v3.yaml" }
+  template = { url = "https://baseline-templates.s3.us-east-1.amazonaws.com/config/v3.yaml?versionId=Kq2c8eTP" }
 
   permission_model = {
     self_managed = {
@@ -41,7 +41,7 @@ run "renders_a_self_managed_stack_set" {
   }
 
   assert {
-    condition     = aws_cloudformation_stack_set.this.template_url == "https://baseline-templates.s3.us-east-1.amazonaws.com/config/v3.yaml"
+    condition     = aws_cloudformation_stack_set.this.template_url == "https://baseline-templates.s3.us-east-1.amazonaws.com/config/v3.yaml?versionId=Kq2c8eTP"
     error_message = "template.url must pass through as template_url."
   }
 

@@ -5,7 +5,7 @@ mock_provider "aws" {}
 
 variables {
   name     = "baseline-config"
-  template = { url = "https://baseline-templates.s3.amazonaws.com/config.yaml" }
+  template = { url = "https://baseline-templates.s3.amazonaws.com/config.yaml?versionId=Kq2c8eTP" }
 
   permission_model = {
     self_managed = {
@@ -123,7 +123,7 @@ run "accepts_s3_website_in_the_object_key" {
 
   # The website check reads the host only, not the object key.
   variables {
-    template = { url = "https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml" }
+    template = { url = "https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml?versionId=Kq2c8eTP" }
   }
 }
 
