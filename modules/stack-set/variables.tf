@@ -224,7 +224,7 @@ variable "managed_execution_active" {
 }
 
 variable "tags" {
-  description = "Tags applied to the StackSet, which CloudFormation propagates to every instance stack and to the supported resources in them. The module adds Name = name; a Name given here wins. At most 50 tags in total including Name (provider default_tags also count)."
+  description = "Tags applied to the StackSet, which CloudFormation propagates to every instance stack and to the supported resources in them. The module adds Name = name; a Name given here wins. At most 50 tags in total including Name (provider default_tags also count). Keys 1 to 128 and values 1 to 256 characters of letters, digits, spaces, and _ . : / = + - @; no aws: key prefix."
   type        = map(string)
   default     = {}
   nullable    = false
@@ -237,6 +237,18 @@ variable "tags" {
   validation {
     condition     = alltrue([for key in keys(var.tags) : !startswith(lower(key), "aws:")])
     error_message = "Tag keys may not start with the reserved aws: prefix."
+  }
+
+  validation {
+    # CloudFormation Tag: key 1-128 and value 1-256 characters. The character
+    # set is the common AWS tagging one; tags propagate to the resources in
+    # the stack, whose services enforce it. Matches aws.modules.resource-groups.
+    condition = alltrue([
+      for key, value in var.tags :
+      length(key) >= 1 && length(key) <= 128 && can(regex("^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+$", key)) &&
+      length(value) >= 1 && length(value) <= 256 && can(regex("^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+$", value))
+    ])
+    error_message = "Tag keys must be 1 to 128 characters and values 1 to 256 (CloudFormation rejects empty values), both of letters, digits, spaces, and _ . : / = + - @."
   }
 }
 

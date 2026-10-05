@@ -357,6 +357,64 @@ run "rejects_reserved_aws_tag_prefix" {
   expect_failures = [var.tags]
 }
 
+run "rejects_tag_key_with_invalid_character" {
+  command = plan
+
+  variables {
+    tags = { "owner#team" = "x" }
+  }
+
+  expect_failures = [var.tags]
+}
+
+run "rejects_tag_key_over_128_characters" {
+  command = plan
+
+  variables {
+    tags = { (format("k%128s", "")) = "x" }
+  }
+
+  expect_failures = [var.tags]
+}
+
+run "rejects_tag_value_over_256_characters" {
+  command = plan
+
+  variables {
+    tags = { Owner = join("", [for i in range(257) : "v"]) }
+  }
+
+  expect_failures = [var.tags]
+}
+
+run "rejects_empty_tag_value" {
+  command = plan
+
+  variables {
+    tags = { Owner = "" }
+  }
+
+  expect_failures = [var.tags]
+}
+
+run "rejects_tag_value_with_invalid_character" {
+  command = plan
+
+  variables {
+    tags = { Owner = "ops;sec" }
+  }
+
+  expect_failures = [var.tags]
+}
+
+run "accepts_tags_using_the_full_character_set" {
+  command = plan
+
+  variables {
+    tags = { "cost-center:team/a_b.c" = "Ops + Sec @ HQ=1 Zürich" }
+  }
+}
+
 run "rejects_malformed_timeout" {
   command = plan
 

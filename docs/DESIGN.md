@@ -363,7 +363,8 @@ defaults (tolerance 0, concurrency 1) stop at the first failure.
   explicit inputs, and the self-managed roles are always sent.
 - No secrets in parameters (documented), no sensitive output, no data
   sources, no IAM resources created by the module.
-- Tags limited to 50 and `aws:`-prefixed keys rejected at plan.
+- Tags limited to 50, `aws:`-prefixed keys rejected, and key and value
+  length and character set checked at plan.
 - Stack policies supported but opt-in, since the right policy depends on the
   template.
 - StackSet rollouts default to the slowest, safest API settings.

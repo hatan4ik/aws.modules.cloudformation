@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - The S3 website-endpoint exclusion on `template.url` (root and `stack-set`) and `stack_policy.url` checked the whole URL for the substring `s3-website`, so a REST-endpoint URL such as `https://bucket.s3.us-east-1.amazonaws.com/templates/s3-website.yaml`, or a bucket whose name contains `s3-website`, was wrongly rejected. It now matches only the website-endpoint host forms `<bucket>.s3-website-<region>.amazonaws.com` and `<bucket>.s3-website.<region>.amazonaws.com` (and `.com.cn`).
+- `tags` (root and `stack-set`) now validates each key (1 to 128 characters) and value (1 to 256; CloudFormation rejects an empty value) and their character set (letters, digits, spaces, and `_ . : / = + - @`), as `aws.modules.resource-groups` does, so a bad tag fails at plan instead of apply. Previously only the count and the `aws:` prefix were checked.
 
 ### Changed
 
