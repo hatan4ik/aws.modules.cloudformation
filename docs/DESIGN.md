@@ -357,8 +357,12 @@ defaults (tolerance 0, concurrency 1) stop at the first failure.
 
 ## Security defaults
 
-- No capability acknowledged unless listed; `CAPABILITY_AUTO_EXPAND` refused
-  for service-managed StackSets, which cannot run macros.
+- No capability acknowledged unless listed. `CAPABILITY_AUTO_EXPAND` is
+  accepted for service-managed StackSets, as `CreateStackSet` accepts it.
+  What AWS rejects is a template that references a macro or transform, and
+  the module cannot see that, so it is documented rather than checked. v1.0.0
+  refused the capability itself, which was stricter than AWS and still did not
+  catch the real failure.
 - Stack service role and StackSet administration and execution roles are
   explicit inputs, and the self-managed roles are always sent.
 - No secrets in parameters (documented), no sensitive output, no data
@@ -382,7 +386,7 @@ defaults (tolerance 0, concurrency 1) stop at the first failure.
   permission-model variants end to end, including OU and root targets,
   delegated admin, auto-deployment on and off), `operation_preferences` (the
   split between StackSet and instances), `validation` (every validation and
-  the three preconditions), `checks`, and one apply-mode output file per
+  the two preconditions), `checks`, and one apply-mode output file per
   permission model (an OU instance reports every account it reached).
 - `tests/integration/smoke` applies the root module for real with a
   zero-cost `WaitConditionHandle` template and an in-place parameter update.

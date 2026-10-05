@@ -88,6 +88,7 @@ What a failure looks like, and what to do:
 - Accounts reached through auto-deployment are not in Terraform state. Their failures appear in `list-stack-set-operations` as auto-deployment operations, and `operation_preferences` does not apply to them.
 - Changing `name`, or anything in `auto_deployment`, replaces the StackSet: every instance is deleted, then everything is recreated. Changing an instance key replaces that instance. Read the plan before applying either.
 - Deleting an instance deletes its stacks in the target accounts unless `retain_stack = true`.
+- A service-managed StackSet cannot run macros or transforms (including `AWS::Serverless` and `AWS::Include`). CloudFormation accepts `CAPABILITY_AUTO_EXPAND` for it, but a template that references a macro fails at apply; the module cannot detect that from the template. Expand the template first (create a change set for it in a scratch stack and deploy the output of `aws cloudformation get-template --template-stage Processed`), or use `self_managed`.
 
 Detect drift and failed instances outside Terraform with an EventBridge rule on `aws.cloudformation` `CloudFormation StackSet Operation Status Change` events whose status is `FAILED`, or periodically with the `list-stack-instances` query above.
 
@@ -124,7 +125,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| <a name="input_capabilities"></a> [capabilities](#input\_capabilities) | Capabilities the template needs acknowledged: CAPABILITY\_IAM, CAPABILITY\_NAMED\_IAM, CAPABILITY\_AUTO\_EXPAND. Service-managed StackSets do not support macros or transforms, so CAPABILITY\_AUTO\_EXPAND is rejected for them. | `set(string)` | `[]` | no |
+| <a name="input_capabilities"></a> [capabilities](#input\_capabilities) | Capabilities the template needs acknowledged: CAPABILITY\_IAM, CAPABILITY\_NAMED\_IAM, CAPABILITY\_AUTO\_EXPAND. CloudFormation accepts CAPABILITY\_AUTO\_EXPAND for either permission model, but a service-managed StackSet cannot run macros or transforms (including AWS::Serverless and AWS::Include): a template that references one fails at apply even with the capability. The module cannot detect a macro in the template, so expand it first or use self\_managed. | `set(string)` | `[]` | no |
 | <a name="input_description"></a> [description](#input\_description) | Optional StackSet description, 1 to 1,024 characters. null (the default) sets none. | `string` | `null` | no |
 | <a name="input_managed_execution_active"></a> [managed\_execution\_active](#input\_managed\_execution\_active) | Whether StackSets runs non-conflicting operations concurrently and queues conflicting ones. true by default, unlike the API: Terraform creates the instances of one StackSet in parallel, and without managed execution the second concurrent operation fails with OperationInProgressException. | `bool` | `true` | no |
 | <a name="input_name"></a> [name](#input\_name) | StackSet name. Same rules as a stack name: starts with a letter, then letters, digits, and hyphens only, 128 characters at most, unique per administrator account and region. Changing it replaces the StackSet and every instance. | `string` | n/a | yes |

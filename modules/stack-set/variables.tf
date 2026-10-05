@@ -78,7 +78,7 @@ variable "parameters" {
 }
 
 variable "capabilities" {
-  description = "Capabilities the template needs acknowledged: CAPABILITY_IAM, CAPABILITY_NAMED_IAM, CAPABILITY_AUTO_EXPAND. Service-managed StackSets do not support macros or transforms, so CAPABILITY_AUTO_EXPAND is rejected for them."
+  description = "Capabilities the template needs acknowledged: CAPABILITY_IAM, CAPABILITY_NAMED_IAM, CAPABILITY_AUTO_EXPAND. CloudFormation accepts CAPABILITY_AUTO_EXPAND for either permission model, but a service-managed StackSet cannot run macros or transforms (including AWS::Serverless and AWS::Include): a template that references one fails at apply even with the capability. The module cannot detect a macro in the template, so expand it first or use self_managed."
   type        = set(string)
   default     = []
   nullable    = false

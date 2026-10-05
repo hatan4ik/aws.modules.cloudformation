@@ -51,11 +51,6 @@ resource "aws_cloudformation_stack_set" "this" {
       condition     = length(local.mismatched_instance_keys) == 0
       error_message = "stack_instances targets must match the permission model: 12-digit account IDs for self_managed, OU IDs (ou-...) or the root ID (r-...) for service_managed. Mismatched keys: ${join(", ", local.mismatched_instance_keys)}."
     }
-
-    precondition {
-      condition     = local.self_managed || !contains(var.capabilities, "CAPABILITY_AUTO_EXPAND")
-      error_message = "Service-managed StackSets do not support macros or transforms, so CAPABILITY_AUTO_EXPAND cannot be acknowledged for them; expand the template before deploying it, or use a self_managed StackSet."
-    }
   }
 }
 

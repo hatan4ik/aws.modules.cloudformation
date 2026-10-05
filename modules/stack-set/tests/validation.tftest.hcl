@@ -505,16 +505,21 @@ run "rejects_account_targets_for_service_managed" {
   expect_failures = [aws_cloudformation_stack_set.this]
 }
 
-run "rejects_auto_expand_for_service_managed" {
+run "accepts_auto_expand_for_service_managed" {
   command = plan
 
+  # CreateStackSet accepts the capability for service-managed StackSets; only
+  # a template that references a macro fails, which is not checkable here.
   variables {
     permission_model = { service_managed = { auto_deployment = { enabled = true } } }
     stack_instances  = { "ou-ab12-11111111/us-east-1" = {} }
     capabilities     = ["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND"]
   }
 
-  expect_failures = [aws_cloudformation_stack_set.this]
+  assert {
+    condition     = contains(aws_cloudformation_stack_set.this.capabilities, "CAPABILITY_AUTO_EXPAND")
+    error_message = "CAPABILITY_AUTO_EXPAND must pass through for a service-managed StackSet."
+  }
 }
 
 run "accepts_boundary_values" {
