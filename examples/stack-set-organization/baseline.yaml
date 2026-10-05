@@ -1,0 +1,29 @@
+# Stand-in for an organization-wide baseline: one IAM role every member
+# account must have, deployed by StackSets to each account in the targeted
+# OUs and to every account that joins them later.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Example baseline - read-only audit role trusted by the security account.
+Parameters:
+  SecurityAccountId:
+    Type: String
+    AllowedPattern: "[0-9]{12}"
+  RoleName:
+    Type: String
+    Default: security-audit
+Resources:
+  AuditRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${SecurityAccountId}:root"
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/SecurityAudit"
+Outputs:
+  AuditRoleArn:
+    Value: !GetAtt AuditRole.Arn

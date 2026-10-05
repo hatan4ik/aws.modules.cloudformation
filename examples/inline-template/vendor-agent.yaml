@@ -1,0 +1,23 @@
+# Stand-in for a vendor-delivered template, vendored into the repository at a
+# pinned version. In real use this file comes from the vendor unchanged; you
+# would not write CloudFormation yourself for resources Terraform can create.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Example vendor agent - log group the agent writes to.
+Parameters:
+  AgentName:
+    Type: String
+  RetentionInDays:
+    Type: Number
+    Default: 30
+Resources:
+  AgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/vendor/${AgentName}"
+      RetentionInDays: !Ref RetentionInDays
+Outputs:
+  LogGroupArn:
+    Value: !GetAtt AgentLogGroup.Arn
+  LogGroupName:
+    Value: !Ref AgentLogGroup
