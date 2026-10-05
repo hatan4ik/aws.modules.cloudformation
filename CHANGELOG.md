@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-Initial release. Proposed version: 1.0.0.
+## [1.0.0] - 2026-10-05
+
+Initial release.
 
 ### Added
 
@@ -19,3 +21,6 @@ Initial release. Proposed version: 1.0.0.
 - Credential-driven integration suite `smoke` (`make integration-smoke`, dispatch-only `integration` workflow) that creates, updates, and deletes a zero-cost stack, with the IAM trust and permissions documents its role needs.
 - Examples: `inline-template`, `s3-template-url`, `stack-set-organization`.
 - `docs/DESIGN.md` (why the module exists, decisions, failure-mode analysis, quotas, deferred items), README failure-mode documentation for `ROLLBACK_COMPLETE` and StackSet rollouts, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE`, and repository standards (`Makefile`, pre-commit, tflint, terraform-docs, Checkov, Trivy, Dependabot, issue and pull request templates, CODEOWNERS, and a per-directory CI quality matrix).
+
+[Unreleased]: https://github.com/hatan4ik/aws.modules.cloudformation/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/hatan4ik/aws.modules.cloudformation/releases/tag/v1.0.0

@@ -1,6 +1,6 @@
 # Design: aws.modules.cloudformation v1
 
-Status: proposed 2026-10-05 for v1.0.0. There is no live consumer yet.
+Status: accepted 2026-10-05, released as v1.0.0. There is no live consumer yet.
 
 ## Why this module exists
 
