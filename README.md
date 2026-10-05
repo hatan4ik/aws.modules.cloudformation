@@ -44,7 +44,149 @@ resource "aws_ssm_parameter" "agent_queue" {
 
 This creates the stack `vendor-agent` from a versioned template object in S3, acknowledges that the template creates named IAM roles, lets CloudFormation operate the stack through the given service role, rolls the stack back if the first create fails, and exposes the stack's `QueueUrl` output to the rest of the configuration.
 
-For StackSets, see [`modules/stack-set`](modules/stack-set) and [`examples/stack-set-organization`](examples/stack-set-organization).
+### Prerequisites
+
+The quick start takes two things as given: a role CloudFormation can assume (`iam_role_arn`) and a template it can read (`template.url`). The module does not create either, deliberately: the role's permissions are whatever the template's resources need, which only the template's owner knows, and the template's storage has its own lifecycle. This is the shape of both, so nobody has to guess.
+
+**1. The service role (`iam_role_arn`).** Optional, but without it CloudFormation acts with the credentials of whoever runs Terraform, and an advisory check warns. The role trusts `cloudformation.amazonaws.com` and carries exactly the permissions to create, update, read, and delete the template's resources. Those are template-specific: the sketch below is for [`examples/inline-template`](examples/inline-template)'s `vendor-agent.yaml`, which creates one CloudWatch Logs log group named `/vendor/<AgentName>`. For any template, the authoritative list per resource type is the `handlers` section of its registry schema (`aws cloudformation describe-type --type RESOURCE --type-name AWS::Logs::LogGroup --query Schema --output text`).
+
+```hcl
+resource "aws_iam_role" "cloudformation_vendor_agent" {
+  name = "cloudformation-vendor-agent"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "cloudformation.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+# Template-specific: what vendor-agent.yaml's one AWS::Logs::LogGroup needs,
+# from the handler permissions of that resource type, scoped to its name.
+resource "aws_iam_role_policy" "cloudformation_vendor_agent" {
+  name = "vendor-agent-template"
+  role = aws_iam_role.cloudformation_vendor_agent.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup", "logs:DeleteLogGroup",
+          "logs:PutRetentionPolicy", "logs:DeleteRetentionPolicy",
+          "logs:TagResource", "logs:UntagResource", "logs:ListTagsForResource",
+          "logs:GetDataProtectionPolicy", "logs:DeleteDataProtectionPolicy",
+        ]
+        Resource = "arn:aws:logs:us-east-1:123456789012:log-group:/vendor/*"
+      },
+      {
+        # Describe calls are not scoped to one log group.
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups", "logs:DescribeIndexPolicies", "logs:DescribeResourcePolicies"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+module "vendor_agent" {
+  source = "git::https://github.com/hatan4ik/aws.modules.cloudformation.git?ref=<commit-sha>" # v1.0.0
+
+  name         = "vendor-agent"
+  template     = { body = file("${path.module}/vendor-agent.yaml") }
+  parameters   = { AgentName = "vendor-agent", RetentionInDays = "90" }
+  iam_role_arn = aws_iam_role.cloudformation_vendor_agent.arn
+
+  # The policy must exist before CloudFormation uses the role, and must
+  # outlive the stack so the delete can still run.
+  depends_on = [aws_iam_role_policy.cloudformation_vendor_agent]
+}
+```
+
+Things that bite:
+
+- The identity that runs Terraform needs `iam:PassRole` on the role, or `CreateStack` is refused.
+- CloudFormation uses the role for every later operation on the stack, including delete, and the role cannot be removed from the stack afterwards. Keep it (and its policy) for as long as the stack exists; the `depends_on` above makes `terraform destroy` delete the stack first. Anyone allowed to update the stack can act with the role, even without `iam:PassRole` on it, so keep it least-privilege.
+- A template that creates IAM resources (`CAPABILITY_IAM`/`CAPABILITY_NAMED_IAM`, as in the quick start) needs the matching `iam:` actions in this policy too; with a missing action, the first create fails and leaves `ROLLBACK_COMPLETE` (see [Failure modes](#failure-modes)).
+
+**2. The template source.** Prefer `template = { body = file(...) }` whenever the template fits: nothing to host, no read permissions to arrange, and the template is reviewed in the same diff. The two sources have different size limits, which the module checks where it can:
+
+| Source | CloudFormation limit | Checked by the module |
+| --- | --- | --- |
+| `template.body` (sent inline in the API call as `TemplateBody`) | 51,200 bytes | Yes, in UTF-8 bytes, at plan |
+| `template.url` (`TemplateURL`, an object in Amazon S3) | 1 MB for the object; the URL itself at most 5,120 characters | The URL only; the module never sees the object |
+
+Above 51,200 bytes, or when a vendor ships the template in S3, use `template.url`. AWS documents that the **IAM identity calling `CreateStack`/`UpdateStack`** (the credentials Terraform runs with) needs `s3:GetObject` on the object, plus `kms:Decrypt` on the key if the bucket uses a customer managed KMS key. There is no CloudFormation service principal to grant in a bucket policy. In the same account, the caller's identity policy is enough; for a bucket in another account, the bucket policy must also grant that identity. A minimal private, versioned bucket with a content-addressed key, so the same plan always deploys the same bytes:
+
+```hcl
+resource "aws_s3_bucket" "templates" {
+  bucket = "example-cfn-templates-123456789012"
+}
+
+resource "aws_s3_bucket_public_access_block" "templates" {
+  bucket                  = aws_s3_bucket.templates.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "templates" {
+  bucket = aws_s3_bucket.templates.id
+  versioning_configuration { status = "Enabled" }
+}
+
+# A new key per template content: an update is a new URL, never an
+# overwritten object Terraform cannot see.
+resource "aws_s3_object" "vendor_agent" {
+  bucket = aws_s3_bucket.templates.id
+  key    = "vendor-agent/${filemd5("${path.module}/vendor-agent.yaml")}.yaml"
+  source = "${path.module}/vendor-agent.yaml"
+}
+
+# Only needed when Terraform runs as a principal of another account; in the
+# same account, s3:GetObject in that principal's own policy is enough.
+resource "aws_s3_bucket_policy" "templates" {
+  bucket = aws_s3_bucket.templates.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "TerraformDeployerReadsTemplates"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::210987654321:role/terraform-deployer" }
+        Action    = ["s3:GetObject", "s3:GetObjectVersion"]
+        Resource  = "${aws_s3_bucket.templates.arn}/*"
+      },
+      {
+        Sid       = "DenyInsecureTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource  = [aws_s3_bucket.templates.arn, "${aws_s3_bucket.templates.arn}/*"]
+        Condition = { Bool = { "aws:SecureTransport" = "false" } }
+      },
+    ]
+  })
+}
+
+module "vendor_agent" {
+  source = "git::https://github.com/hatan4ik/aws.modules.cloudformation.git?ref=<commit-sha>" # v1.0.0
+
+  name     = "vendor-agent"
+  template = { url = "https://${aws_s3_bucket.templates.bucket_regional_domain_name}/${aws_s3_object.vendor_agent.key}" }
+  # ...
+}
+```
+
+The same two prerequisites apply to `modules/stack-set` (the template is read once, in the administrator account); its own prerequisites, the StackSets roles or AWS Organizations setup, are in [modules/stack-set, Prerequisites](modules/stack-set/README.md#prerequisites).
+
+For StackSets, see [`modules/stack-set`](modules/stack-set) and [`examples/stack-set-organization`](examples/stack-set-organization); for a self-managed StackSet from zero, including its IAM roles, [`modules/self-managed-roles`](modules/self-managed-roles) and [`examples/self-managed-bootstrap`](examples/self-managed-bootstrap).
 
 ## Architecture
 
@@ -61,9 +203,15 @@ modules/stack-set (one StackSet, N instances)
 ├── locals.tf      permission model, key splitting, operation preference split
 ├── checks.tf      no_stack_instances, max_concurrency_capped_by_failure_tolerance (advisory)
 └── outputs.tf     id, arn, name, permission_model, stack_instances
+
+modules/self-managed-roles (one IAM role per call)
+├── main.tf        aws_iam_role.administration | aws_iam_role.execution, their inline policies and attachments
+├── locals.tf      trust and permission policy documents (from AWS's sample templates)
+├── checks.tf      execution_role_administrator_access (advisory)
+└── outputs.tf     role_arn, role_name, stack_set_permission_model
 ```
 
-The root module and the submodule are independent: the root never calls the submodule, and each can be used on its own.
+The root module and the submodules are independent: the root never calls a submodule, and each can be used on its own. `modules/self-managed-roles` exists to produce `modules/stack-set`'s self-managed `permission_model`.
 
 | | Root module | `modules/stack-set` |
 | --- | --- | --- |
@@ -125,12 +273,12 @@ StackSets fail differently (per account and region, inside one operation); see [
 
 ## Testing
 
-- Contract tests (`terraform test` in the root and in `modules/stack-set`, run by CI) use `mock_provider`: no credentials, nothing created. Plan-mode runs assert on every argument the module sends; every validation and precondition has a failing run through `expect_failures`; apply-mode runs in their own files give the stack ID, ARN, Outputs, and instance summaries realistic values with `override_resource` and prove every output resolves from the right attribute.
+- Contract tests (`terraform test` in the root, `modules/stack-set`, `modules/self-managed-roles`, and `examples/self-managed-bootstrap`, run by CI) use `mock_provider`: no credentials, nothing created. Plan-mode runs assert on every argument the module sends; every validation and precondition has a failing run through `expect_failures`; apply-mode runs in their own files give the stack ID, ARN, Outputs, and instance summaries realistic values with `override_resource` and prove every output resolves from the right attribute.
 - Integration suite (`tests/integration/`, run by `make integration-smoke` or the dispatch-only `integration` workflow) applies the root module for real in **your** account: a stack with one `AWS::CloudFormation::WaitConditionHandle` (no billable resource) and two Outputs, asserts the stack ARN and Outputs the real API returns, and deletes it. See [tests/integration/README.md](tests/integration/README.md).
 
 ## Design principles
 
-- Single responsibility. The root owns one stack; `modules/stack-set` owns one StackSet and its instances. Neither creates the service roles, templates, buckets, or topics it references.
+- Single responsibility. The root owns one stack; `modules/stack-set` owns one StackSet and its instances. Neither creates the service roles, templates, buckets, or topics it references. `modules/self-managed-roles` owns exactly the two StackSets roles that have no other source (see [docs/DESIGN.md, D13](docs/DESIGN.md#d13-the-self-managed-stackset-roles-get-their-own-submodule)).
 - Open/closed. New stacks, parameters, and instances are data. Adding an account or region to a StackSet is one more `stack_instances` key.
 - Liskov substitution. The submodule takes the same `name`, `template`, `parameters`, `capabilities`, `tags`, and `timeouts` with the same rules, and returns the same `id`, `arn`, and `name`, so moving from one stack to a StackSet does not mean relearning the interface. Where the resources differ (stack policies, StackSet operation preferences, per-instance outputs), the interfaces differ honestly instead of pretending.
 - Interface segregation. A stack needs `name` and `template`; everything else is optional with the API's default or a safer one.
