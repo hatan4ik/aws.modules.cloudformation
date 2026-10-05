@@ -42,7 +42,7 @@ variable "template" {
 }
 
 variable "parameters" {
-  description = "Template parameter values. Always strings on the wire: pass numbers as \"3\" and CommaDelimitedList values as \"a,b,c\". Values are stored in plan and state in clear text; never pass a secret here, resolve it in the template with a dynamic reference instead (see README, Lifecycle notes)."
+  description = "Template parameter values. Always strings on the wire: pass numbers as \"3\" and CommaDelimitedList values as \"a,b,c\". Values are stored in plan and state in clear text; never pass a secret here, resolve it in the template with a dynamic reference instead (see README, Security model)."
   type        = map(string)
   default     = {}
   nullable    = false
