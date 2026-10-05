@@ -34,10 +34,14 @@ module "audit_role_baseline" {
     for ou in var.organizational_unit_ids : "${ou}/${var.region}" => {}
   }
 
-  # The blast radius of a bad template: roll out to 10 percent of the
-  # accounts in a region at a time, and stop the whole operation as soon as
-  # more than one account fails. Regions go one after another, home region
-  # first, so a broken template is caught before it reaches the rest.
+  # The blast radius of a bad template: roll out to at most two accounts in
+  # a region at a time, and stop the whole operation as soon as more than one
+  # account in a region fails. Under the default STRICT_FAILURE_TOLERANCE
+  # mode, concurrency cannot exceed failure tolerance + 1, so 2 is the most
+  # this tolerance allows. For a large organization, max_concurrent_percentage
+  # (for example 10) scales with the OU instead. Regions go one after another,
+  # home region first, so a broken template is caught before it reaches the
+  # rest.
   operation_preferences = {
     failure_tolerance_count = 1
     max_concurrent_count    = 2
