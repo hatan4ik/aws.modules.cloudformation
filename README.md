@@ -179,7 +179,7 @@ module "vendor_agent" {
   source = "git::https://github.com/hatan4ik/aws.modules.cloudformation.git?ref=<commit-sha>" # v1.0.0
 
   name     = "vendor-agent"
-  template = { url = "https://${aws_s3_bucket.templates.bucket_regional_domain_name}/${aws_s3_object.vendor_agent.key}" }
+  template = { url = "https://${aws_s3_bucket.templates.bucket_regional_domain_name}/${aws_s3_object.vendor_agent.key}?versionId=${aws_s3_object.vendor_agent.version_id}" }
   # ...
 }
 ```
