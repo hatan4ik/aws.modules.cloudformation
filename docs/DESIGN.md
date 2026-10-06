@@ -486,7 +486,7 @@ What it deliberately does not do:
 
 Interface. `statements` uses the statement shape this fleet already uses
 for role policies (`aws.modules.ecs-service`'s `task_role_statements`, and
-the resource-policy inputs of `aws.modules.s3`, `aws.modules.ksm`, and
+the resource-policy inputs of `aws.modules.s3`, `aws.modules.kms`, and
 `aws.modules.dynamodb`): a map keyed by Sid, each `{ effect, actions,
 resources, conditions }`. A map, not a list, so the key is the Sid and
 reordering never changes the plan. `pass_roles` models `iam:PassRole` the
