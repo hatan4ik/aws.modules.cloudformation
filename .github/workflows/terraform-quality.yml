@@ -22,10 +22,12 @@ jobs:
           - .
           - modules/stack-set
           - modules/self-managed-roles
+          - modules/service-role
           - examples/inline-template
           - examples/s3-template-url
           - examples/stack-set-organization
           - examples/self-managed-bootstrap
+          - examples/scoped-service-role
     uses: hatan4ik/terraform-pipelines/.github/workflows/terraform-quality.yml@8fc2a04c7931dd449097bb92b15b085278e3f67a # v0.1.1
     with:
       working_directory: ${{ matrix.directory }}

@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := check
 
-ROOT_DIRS     := . modules/stack-set modules/self-managed-roles
+ROOT_DIRS     := . modules/stack-set modules/self-managed-roles modules/service-role
 # Only example directories that contain Terraform, so a stray file under examples/ is ignored.
 EXAMPLE_DIRS  := $(sort $(patsubst %/,%,$(dir $(wildcard examples/*/*.tf))))
 ALL_DIRS      := $(ROOT_DIRS) $(EXAMPLE_DIRS)

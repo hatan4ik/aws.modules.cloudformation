@@ -42,8 +42,10 @@ port the template.
   one `aws_cloudformation_stack_set_instance` per declared target and region.
 - `modules/self-managed-roles` provisions **one** IAM role per call: the
   self-managed StackSets administration role or execution role (D13).
+- `modules/service-role` provisions **one** CloudFormation stack service
+  role per call, for the root module's `iam_role_arn` (D15).
 
-Both are independent: the root does not call the submodule, and a caller
+All are independent: the root does not call the submodule, and a caller
 uses whichever matches the resource they need. They are one repository
 because they share the template, parameter, and capability contract and the
 same reasons to exist, not because one wraps the other.
@@ -53,9 +55,10 @@ StackSet roles, template buckets, SNS topics, or Organizations trusted
 access. Those have separate owners and lifecycles; the modules consume their
 identifiers, and neither performs data-source reads. The one exception is
 `modules/self-managed-roles`, which exists only because the self-managed
-StackSet roles have no other source (D13). Stack service roles stay out of
-scope: their permissions are the template's, which no module can know; the
-root README's Prerequisites shows their shape.
+StackSet roles have no other source (D13), and `modules/service-role`, a
+role factory that takes the template's permissions as input instead of
+guessing them (D15). The root module still takes `iam_role_arn` as an
+input and never creates a role itself.
 
 ## Interface
 
@@ -93,6 +96,15 @@ Root:
 - `tags`.
 - Outputs: `role_arn`, `role_name`, `stack_set_permission_model` (the
   administration call's value for `modules/stack-set`'s `permission_model`).
+
+`modules/service-role`:
+
+- `name`, `path` (default `/`), `description`, `account_id` (for the trust
+  conditions), `statements` (map keyed by Sid: `effect`, `actions`,
+  `resources`, `conditions`), `pass_roles` (map keyed by Sid: `role_arns`,
+  `services`), `permissions_boundary_arn`, `tags`.
+- Outputs: `role_arn` (for the root's `iam_role_arn`; depends on the
+  policies), `role_name`, `inline_policies`.
 
 ## Decisions
 
@@ -441,6 +453,81 @@ Not done: reading the object's current version with a data source, which
 would detect drift without the caller's help but would add the module's
 first data-source read and an S3 read permission to every plan.
 
+### D15. A stack service-role factory, not a permission inferrer
+
+Why it exists. The root module takes `iam_role_arn` as an input: dependency
+inversion, because what a stack's role may do is decided by its template,
+which the module cannot see. That stays. But "bring your own role" with
+nothing to help has a predictable failure mode: the stack fails with
+`AccessDenied`, and the quickest fix is a role with `AdministratorAccess`.
+That role then acts for every stack that uses it, and CloudFormation lets
+anyone allowed to update such a stack act with it, even without
+`iam:PassRole` on it. `modules/service-role` makes the narrow role as cheap
+to write as the wide one: the caller lists statements, the module does the
+rest.
+
+What it deliberately does not do:
+
+- Infer permissions from a template. Out of scope, and not a gap to close
+  later: the mapping from a template's properties to the API calls each
+  resource handler makes lives in the registry schemas, changes with them,
+  and depends on property values. The caller must know what the template
+  needs; the module's descriptions and README point at the schema handlers
+  as the source.
+- Accept managed policy ARNs. `modules/self-managed-roles` has
+  `policy_arns`; this module does not, because a `policy_arns` input would
+  make `AdministratorAccess` a one-line choice again. A caller who really
+  needs a managed policy attaches it to the `role_name` output, visibly.
+- Serve `modules/stack-set`. It has no stack service-role input: a StackSet
+  takes an administration role ARN (whose only permission is assuming
+  execution roles) and an execution role name, which are
+  `modules/self-managed-roles` (D13). A stack service role in that slot
+  would be the wrong role.
+
+Interface. `statements` uses the statement shape this fleet already uses
+for role policies (`aws.modules.ecs-service`'s `task_role_statements`, and
+the resource-policy inputs of `aws.modules.s3`, `aws.modules.ksm`, and
+`aws.modules.dynamodb`): a map keyed by Sid, each `{ effect, actions,
+resources, conditions }`. A map, not a list, so the key is the Sid and
+reordering never changes the plan. `pass_roles` models `iam:PassRole` the
+way AWS recommends scoping it: on named roles (a wildcard is allowed in the
+name, for the generated names of roles the template creates), and only to
+named services through `iam:PassedToService`. Both lists are required, so
+"any role to any service" cannot be written; `role/*` can, and an advisory
+check warns about it, as another does about an `Allow` of `*`. The two
+documents are separate inline policies (`CloudFormationTemplate`,
+`CloudFormationPassRole`), so a caller's Sid can never collide with a
+pass-role Sid; a precondition enforces IAM's 10,240-character aggregate
+inline policy limit.
+
+Trust. Only `cloudformation.amazonaws.com`, with
+`modules/self-managed-roles`' confused-deputy keys (`aws:SourceAccount`,
+`aws:SourceArn`) bound to `account_id`, but with the `IfExists` operators
+and an `aws:SourceArn` of `arn:*:cloudformation:*:<account_id>:*`. The
+difference is deliberate: AWS documents these keys for the StackSets
+administration role (D13), registry extension roles, and Git sync roles,
+but its pages on the stack service role (the CloudFormation user guide's
+"CloudFormation service role" and the prescriptive guidance on
+least-privilege CloudFormation) show only the plain trust policy, and do not
+say that CloudFormation puts either key in the request context when it
+assumes a stack's role. A plain `StringEquals`/`ArnLike` on a key that is
+absent evaluates false, which would make every stack using the role fail to
+create. `IfExists` binds whenever the key is present and otherwise reduces
+to AWS's documented trust policy. The `aws:SourceArn` pattern is AWS's own
+account-wide example from its confused-deputy page, because the ARN
+CloudFormation would report (stack or change set) is undocumented for this
+role. Not verified against a real stack in this change; the integration
+suite is the place to prove it and, if the keys turn out to be present, to
+tighten the operators.
+
+Ordering. `role_arn` has `depends_on` on both inline policies. A module
+output otherwise depends only on what its expression references, the role,
+so `terraform graph` of `examples/scoped-service-role` showed the stack
+depending on `aws_iam_role.this` alone: the stack could be created before
+its policies were attached, and on destroy the policies could be removed
+before the stack, leaving a delete CloudFormation cannot perform. With the
+`depends_on`, the graph shows the stack depending on both policies.
+
 ### D16. A body that parses but is not a template mapping gets an advisory check
 
 The brief asked for plan-time syntax pre-validation of `template.body`:
@@ -528,7 +615,9 @@ defaults (tolerance 0, concurrency 1) stop at the first failure.
   sources. The root module and `modules/stack-set` create no IAM resources;
   `modules/self-managed-roles` creates exactly the two StackSets roles, with
   no permission broader than AWS's samples and the execution role reduced to
-  AWS's documented minimum by default (D13).
+  AWS's documented minimum by default (D13). `modules/service-role` grants
+  only the caller's statements, accepts no managed policy, and warns on an
+  `Allow` of `*` and on `iam:PassRole` over every role (D15).
 - Tags limited to 50, `aws:`-prefixed keys rejected, and key and value
   length and character set checked at plan.
 - Stack policies supported but opt-in, since the right policy depends on the
@@ -559,8 +648,15 @@ defaults (tolerance 0, concurrency 1) stop at the first failure.
   `checks`, and one apply-mode output file per branch; the administration
   one also feeds `stack_set_permission_model` into `modules/stack-set` and
   asserts the StackSet sends both values.
+- `modules/service-role/tests/`: `role` (trust and template policy
+  documents compared exactly), `pass_role`, `validation` (every validation
+  and the size precondition), `checks`, and `outputs` (apply mode; also
+  feeds `role_arn` into the root module and asserts the stack sends it).
 - `examples/self-managed-bootstrap/tests/wiring` applies the whole example
   with both providers mocked, proving the three calls compose.
+- `examples/scoped-service-role/tests/wiring` applies the example mocked and
+  asserts the scoping: the template's two resource types, actions of exactly
+  their two services, on exactly their two resources, no `*`.
 - `tests/integration/smoke` applies the root module for real with a
   zero-cost `WaitConditionHandle` template and an in-place parameter update.
   There is no StackSet integration suite: it needs Organizations trusted
