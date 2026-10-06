@@ -211,9 +211,15 @@ modules/self-managed-roles (one IAM role per call)
 ├── locals.tf      trust and permission policy documents (from AWS's sample templates)
 ├── checks.tf      execution_role_administrator_access (advisory)
 └── outputs.tf     role_arn, role_name, stack_set_permission_model
+
+modules/service-role (one stack service role per call)
+├── main.tf        aws_iam_role.this, aws_iam_role_policy.template | .pass_role
+├── locals.tf      trust policy, statements and pass-role documents, size
+├── checks.tf      statement_allows_every_action, pass_role_to_any_role (advisory)
+└── outputs.tf     role_arn (for iam_role_arn), role_name, inline_policies
 ```
 
-The root module and the submodules are independent: the root never calls a submodule, and each can be used on its own. `modules/self-managed-roles` exists to produce `modules/stack-set`'s self-managed `permission_model`.
+The root module and the submodules are independent: the root never calls a submodule, and each can be used on its own. `modules/self-managed-roles` exists to produce `modules/stack-set`'s self-managed `permission_model`; `modules/service-role` exists to produce the root module's `iam_role_arn` (see [`examples/scoped-service-role`](examples/scoped-service-role)).
 
 | | Root module | `modules/stack-set` |
 | --- | --- | --- |
@@ -257,7 +263,7 @@ StackSets fail differently (per account and region, inside one operation); see [
 
 ## Security model
 
-- Least privilege by role. With `iam_role_arn`, CloudFormation uses that role for every operation on the stack, and keeps using it even for callers who could not pass it themselves. Grant the role exactly what the template creates. Without it, the stack runs with whatever the Terraform caller can do, and `check.service_role_not_set` warns on every plan.
+- Least privilege by role. With `iam_role_arn`, CloudFormation uses that role for every operation on the stack, and keeps using it even for callers who could not pass it themselves. Grant the role exactly what the template creates; [`modules/service-role`](modules/service-role) builds such a role from the statements you list, and [`examples/scoped-service-role`](examples/scoped-service-role) shows one scoped to a template's two resources. Without it, the stack runs with whatever the Terraform caller can do, and `check.service_role_not_set` warns on every plan.
 - No capability by default. A template that creates IAM resources or uses transforms fails with `InsufficientCapabilities` until the caller lists the capability. Review a template before acknowledging `CAPABILITY_NAMED_IAM` or `CAPABILITY_AUTO_EXPAND`: a transform runs a Lambda function that its owner can change without you.
 - Parameters are not secret. `parameters` values are stored in plan and state in clear text, and the module does not mark them sensitive. `NoEcho` parameters read back from CloudFormation as `****`, which shows a diff on every plan. Resolve secrets inside the template with a dynamic reference (`{{resolve:secretsmanager:...}}` or `{{resolve:ssm-secure:...}}`) instead.
 - Pin the template. A `template.url` whose object can be overwritten deploys whatever is there at apply time, and Terraform cannot see the change. Pin the object version with `?versionId=`; see [Template immutability](#template-immutability).
@@ -315,12 +321,12 @@ A content-addressed key (a new key per content, as in [Prerequisites](#prerequis
 
 ## Testing
 
-- Contract tests (`terraform test` in the root, `modules/stack-set`, `modules/self-managed-roles`, and `examples/self-managed-bootstrap`, run by CI) use `mock_provider`: no credentials, nothing created. Plan-mode runs assert on every argument the module sends; every validation and precondition has a failing run through `expect_failures`; apply-mode runs in their own files give the stack ID, ARN, Outputs, and instance summaries realistic values with `override_resource` and prove every output resolves from the right attribute.
+- Contract tests (`terraform test` in the root, `modules/stack-set`, `modules/self-managed-roles`, `modules/service-role`, `examples/self-managed-bootstrap`, and `examples/scoped-service-role`, run by CI) use `mock_provider`: no credentials, nothing created. Plan-mode runs assert on every argument the module sends; every validation and precondition has a failing run through `expect_failures`; apply-mode runs in their own files give the stack ID, ARN, Outputs, and instance summaries realistic values with `override_resource` and prove every output resolves from the right attribute.
 - Integration suite (`tests/integration/`, run by `make integration-smoke` or the dispatch-only `integration` workflow) applies the root module for real in **your** account: a stack with one `AWS::CloudFormation::WaitConditionHandle` (no billable resource) and two Outputs, asserts the stack ARN and Outputs the real API returns, and deletes it. See [tests/integration/README.md](tests/integration/README.md).
 
 ## Design principles
 
-- Single responsibility. The root owns one stack; `modules/stack-set` owns one StackSet and its instances. Neither creates the service roles, templates, buckets, or topics it references. `modules/self-managed-roles` owns exactly the two StackSets roles that have no other source (see [docs/DESIGN.md, D13](docs/DESIGN.md#d13-the-self-managed-stackset-roles-get-their-own-submodule)).
+- Single responsibility. The root owns one stack; `modules/stack-set` owns one StackSet and its instances. Neither creates the service roles, templates, buckets, or topics it references. `modules/self-managed-roles` owns exactly the two StackSets roles that have no other source (see [docs/DESIGN.md, D13](docs/DESIGN.md#d13-the-self-managed-stackset-roles-get-their-own-submodule)); `modules/service-role` owns one stack service role built from the caller's statements (see [D15](docs/DESIGN.md#d15-a-stack-service-role-factory-not-a-permission-inferrer)).
 - Open/closed. New stacks, parameters, and instances are data. Adding an account or region to a StackSet is one more `stack_instances` key.
 - Liskov substitution. The submodule takes the same `name`, `template`, `parameters`, `capabilities`, `tags`, and `timeouts` with the same rules, and returns the same `id`, `arn`, and `name`, so moving from one stack to a StackSet does not mean relearning the interface. Where the resources differ (stack policies, StackSet operation preferences, per-instance outputs), the interfaces differ honestly instead of pretending.
 - Interface segregation. A stack needs `name` and `template`; everything else is optional with the API's default or a safer one.

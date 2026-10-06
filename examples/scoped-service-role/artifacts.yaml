@@ -1,0 +1,38 @@
+# A small stand-in template: an artifacts bucket and an SSM parameter that
+# publishes its name. The service role in main.tf grants exactly what these
+# two resource types need, on exactly these two resources.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Example - artifacts bucket and an SSM parameter with its name.
+Resources:
+  # SSE-S3, not a customer managed KMS key: a CMK would add a third resource
+  # type and KMS permissions to a role this example keeps to exactly two.
+  # Use SSE-KMS with your own key for real data.
+  # trivy:ignore:AWS-0132
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+  BucketNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${AWS::StackName}/bucket-name"
+      Type: String
+      Value: !Ref ArtifactsBucket
+Outputs:
+  BucketName:
+    Value: !Ref ArtifactsBucket
+  ParameterName:
+    Value: !Ref BucketNameParameter
